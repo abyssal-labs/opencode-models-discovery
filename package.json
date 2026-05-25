@@ -1,6 +1,6 @@
 {
   "name": "@abyssal-labs/opencode-models-discovery",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "opencode plugin that refreshes OpenAI-compatible model metadata from /models endpoints",
   "homepage": "https://github.com/abyssal-labs/opencode-models-discovery#readme",
   "repository": {
