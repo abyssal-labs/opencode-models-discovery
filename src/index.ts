@@ -306,7 +306,7 @@ function applyRemoteToProviderModel(existing: ProviderModel, remote: RemoteModel
 
   return {
     ...existing,
-    name: stringValue(remote.name, metadata.display_name, remote.display_name, existing.name) ?? existing.name,
+    name: existing.name || stringValue(remote.name, metadata.display_name, remote.display_name) || existing.id,
     limit: {
       ...existing.limit,
       ...(context !== undefined ? { context } : {}),
@@ -349,7 +349,7 @@ function mapRemoteModel(remote: RemoteModel, existing: ModelConfig): ModelConfig
 
   const mapped: ModelConfig = {
     id: existing.id ?? id,
-    name: stringValue(remote.name, metadata.display_name, remote.display_name, existing.name, id),
+    name: existing.name ?? stringValue(remote.name, metadata.display_name, remote.display_name, id),
   }
 
   if (context !== undefined) {
