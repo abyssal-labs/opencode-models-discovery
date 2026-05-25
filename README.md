@@ -15,11 +15,14 @@ All matching providers are included by default. Use `providers.include` as an op
 For every discovered model, it maps endpoint metadata into opencode model config:
 
 - `metadata.context_window` -> `limit.context`
+- `metadata.context_length` or top-level `context_length` -> `limit.context`
 - `metadata.input_context_window` -> `limit.input`
 - `metadata.max_output_tokens` -> `limit.output`
 - `metadata.display_name` -> `name`
 - `metadata.input_modalities` -> `modalities.input`
 - `metadata.output_modalities` -> `modalities.output`
+- `architecture.input_modalities` -> `modalities.input`
+- `architecture.output_modalities` -> `modalities.output`
 
 Existing models are overridden by default so the wrapper/proxy `/models` metadata wins over models.dev metadata.
 
@@ -29,7 +32,7 @@ If the model list does not expose max output tokens, the plugin uses `128000` as
 
 ```json
 {
-  "plugin": ["/path/to/opencode-models-discovery/src/index.ts"],
+  "plugin": ["@abyssal-labs/opencode-models-discovery"],
   "provider": {
     "openai": {
       "options": {
@@ -49,8 +52,6 @@ If the model list does not expose max output tokens, the plugin uses `128000` as
 }
 ```
 
-Use an absolute path or a path relative to the config file that declares the plugin.
-
 ## Options
 
 Default refresh interval is 24 hours. Cached values are still applied on startup when the cache is fresh; the endpoint is only rechecked after the interval.
@@ -59,7 +60,7 @@ Default refresh interval is 24 hours. Cached values are still applied on startup
 {
   "plugin": [
     [
-      "./opencode-models-discovery/src/index.ts",
+      "@abyssal-labs/opencode-models-discovery",
       {
         "refreshIntervalHours": 12,
         "overrideExisting": true,
