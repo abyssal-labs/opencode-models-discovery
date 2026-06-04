@@ -71,6 +71,15 @@ type RemoteModel = {
   [key: string]: unknown
 }
 
+type RemoteMode = {
+  cost?: Record<string, unknown>
+  provider?: {
+    body?: Record<string, unknown>
+    headers?: Record<string, string>
+  }
+  [key: string]: unknown
+}
+
 type Cache = {
   providers: Record<
     string,
@@ -133,7 +142,9 @@ const plugin: Plugin = async (_input, options = {}) => {
         }
 
         if (models?.length) {
-          applyModels(provider, models, providerOptions.overrideExisting ?? pluginOptions.overrideExisting)
+          const overrideExisting = providerOptions.overrideExisting ?? pluginOptions.overrideExisting
+          if (overrideExisting) provider.models = {}
+          applyModels(provider, models, overrideExisting)
         }
       }
 
@@ -171,7 +182,7 @@ const plugin: Plugin = async (_input, options = {}) => {
           }
         }
 
-        return models?.length ? applyProviderModels(provider, models) : provider.models
+        return models?.length ? applyProviderModels(provider, models, providerOptions.overrideExisting ?? pluginOptions.overrideExisting) : provider.models
       },
     },
   }
@@ -267,23 +278,78 @@ function applyModels(provider: ProviderConfig, models: RemoteModel[], overrideEx
       }
     }
     provider.models[id] = nextModel
+
+    for (const [mode, modeConfig] of Object.entries(remoteModes(remote))) {
+      const modeID = `${id}-${mode}`
+      const existingMode = provider.models[modeID] ?? {}
+      if (!overrideExisting && provider.models[modeID]) continue
+
+      const mappedMode = mapRemoteModel(remote, existingMode)
+      if (!mappedMode) continue
+
+      const nextMode: ModelConfig = {
+        ...existingMode,
+        ...mappedMode,
+        id: existingMode.id ?? modeID,
+        name: existingMode.name ?? `${mapped.name ?? id} ${titleCase(mode)}`,
+      }
+      if (nextModel.limit || mappedMode.limit || existingMode.limit) {
+        nextMode.limit = {
+          ...nextModel.limit,
+          ...existingMode.limit,
+          ...mappedMode.limit,
+        }
+      }
+      if (nextModel.modalities || mappedMode.modalities || existingMode.modalities) {
+        nextMode.modalities = {
+          ...nextModel.modalities,
+          ...existingMode.modalities,
+          ...mappedMode.modalities,
+        }
+      }
+      applyModeConfig(nextMode, modeConfig)
+      provider.models[modeID] = nextMode
+    }
   }
 }
 
-function applyProviderModels(provider: ProviderInfo, models: RemoteModel[]) {
-  const next = { ...provider.models }
+function applyProviderModels(provider: ProviderInfo, models: RemoteModel[], overrideExisting: boolean) {
+  const next = overrideExisting ? {} : { ...provider.models }
+  const template = Object.values(provider.models)[0]
 
   for (const remote of models) {
     const id = modelID(remote)
     if (!id) continue
 
-    const existing = next[id]
+    const existing = provider.models[id] ?? template
     if (!existing) continue
 
-    next[id] = applyRemoteToProviderModel(existing, remote)
+    const applied = applyRemoteToProviderModel(providerModelBase(provider, existing, remote), remote)
+    next[id] = applied
+
+    for (const [mode, modeConfig] of Object.entries(remoteModes(remote))) {
+      const modeID = `${id}-${mode}`
+      const existingMode = next[modeID]
+      const baseMode = existingMode ? applyRemoteToProviderModel(existingMode, remote) : cloneProviderMode(applied, modeID, mode)
+      next[modeID] = applyProviderModeConfig(baseMode, modeConfig)
+    }
   }
 
   return next
+}
+
+function providerModelBase(provider: ProviderInfo, existing: ProviderModel, remote: RemoteModel): ProviderModel {
+  const metadata = remote.metadata ?? {}
+  const id = modelID(remote) ?? existing.id
+
+  return {
+    ...existing,
+    id,
+    providerID: provider.id,
+    name: stringValue(remote.name, metadata.display_name, remote.display_name, id) ?? id,
+    options: { ...existing.options },
+    headers: { ...existing.headers },
+  }
 }
 
 function applyRemoteToProviderModel(existing: ProviderModel, remote: RemoteModel): ProviderModel {
@@ -369,6 +435,111 @@ function mapRemoteModel(remote: RemoteModel, existing: ModelConfig): ModelConfig
   return mapped
 }
 
+function remoteModes(remote: RemoteModel): Record<string, RemoteMode> {
+  const metadata = remote.metadata ?? {}
+  const experimental = objectValue(remote.experimental) ?? objectValue(metadata.experimental)
+  const discovered = objectValue(experimental?.modes) ?? objectValue(remote.modes) ?? objectValue(metadata.modes)
+  const modes: Record<string, RemoteMode> = {}
+
+  if (discovered) {
+    for (const [mode, value] of Object.entries(discovered)) {
+      const config = objectValue(value)
+      modes[mode] = config ? (config as RemoteMode) : {}
+    }
+  }
+
+  for (const mode of stringArray(remote.additional_speed_tiers, metadata.additional_speed_tiers) ?? []) {
+    modes[mode] ??= speedTierMode(remote, mode)
+  }
+
+  return modes
+}
+
+function speedTierMode(remote: RemoteModel, mode: string): RemoteMode {
+  const metadata = remote.metadata ?? {}
+  const serviceTier = serviceTierID(remote, mode) ?? serviceTierID(metadata, mode) ?? mode
+  return { provider: { body: { service_tier: serviceTier } } }
+}
+
+function serviceTierID(source: Record<string, unknown>, mode: string) {
+  const defaultTier = stringValue(source.default_service_tier)
+  const tiers = arrayValue(source.service_tiers)
+  if (!tiers) return defaultTier
+
+  const normalizedMode = mode.toLowerCase()
+  const tier = tiers.map(objectValue).find((item) => {
+    if (!item) return false
+    const id = stringValue(item.id)?.toLowerCase()
+    const name = stringValue(item.name)?.toLowerCase()
+    return id === normalizedMode || name === normalizedMode
+  })
+  return stringValue(tier?.id, defaultTier)
+}
+
+function applyModeConfig(model: ModelConfig, mode: RemoteMode) {
+  const provider = objectValue(mode.provider)
+  const body = objectValue(provider?.body)
+  const headers = objectValue(provider?.headers)
+  const cost = objectValue(mode.cost)
+
+  if (body) model.options = { ...objectValue(model.options), ...camelizeKeys(body) }
+  if (headers) model.headers = { ...objectValue(model.headers), ...stringRecord(headers) }
+  if (cost) model.cost = { ...objectValue(model.cost), ...cost }
+}
+
+function cloneProviderMode(base: ProviderModel, id: string, mode: string): ProviderModel {
+  return {
+    ...base,
+    id,
+    name: `${base.name || base.id} ${titleCase(mode)}`,
+    options: { ...base.options },
+    headers: { ...base.headers },
+  }
+}
+
+function applyProviderModeConfig(model: ProviderModel, mode: RemoteMode): ProviderModel {
+  const provider = objectValue(mode.provider)
+  const body = objectValue(provider?.body)
+  const headers = objectValue(provider?.headers)
+  const cost = objectValue(mode.cost)
+
+  return {
+    ...model,
+    ...(cost ? { cost: applyProviderCost(model.cost, cost) } : {}),
+    options: body ? { ...model.options, ...camelizeKeys(body) } : model.options,
+    headers: headers ? { ...model.headers, ...stringRecord(headers) } : model.headers,
+  }
+}
+
+function applyProviderCost(existing: ProviderModel["cost"], cost: Record<string, unknown>): ProviderModel["cost"] {
+  return {
+    ...existing,
+    input: numberValue(cost.input) ?? existing.input,
+    output: numberValue(cost.output) ?? existing.output,
+    cache: {
+      ...existing.cache,
+      read: numberValue(cost.cache_read) ?? existing.cache.read,
+      write: numberValue(cost.cache_write) ?? existing.cache.write,
+    },
+  }
+}
+
+function camelizeKeys(values: Record<string, unknown>) {
+  return Object.fromEntries(Object.entries(values).map(([key, value]) => [key.replace(/_([a-z])/g, (_, char) => char.toUpperCase()), value]))
+}
+
+function stringRecord(values: Record<string, unknown>) {
+  return Object.fromEntries(Object.entries(values).filter((entry): entry is [string, string] => typeof entry[1] === "string"))
+}
+
+function titleCase(value: string) {
+  return value
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((part) => part[0]?.toUpperCase() + part.slice(1))
+    .join(" ")
+}
+
 function objectValue(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined
 }
@@ -395,6 +566,13 @@ function stringValue(...values: unknown[]) {
 function stringArray(...values: unknown[]) {
   for (const value of values) {
     if (Array.isArray(value) && value.every((item) => typeof item === "string")) return value
+  }
+  return undefined
+}
+
+function arrayValue(...values: unknown[]) {
+  for (const value of values) {
+    if (Array.isArray(value)) return value
   }
   return undefined
 }

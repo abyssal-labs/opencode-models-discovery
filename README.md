@@ -24,7 +24,7 @@ For every discovered model, it maps endpoint metadata into opencode model config
 - `architecture.input_modalities` -> `modalities.input`
 - `architecture.output_modalities` -> `modalities.output`
 
-Existing models are overridden by default so the wrapper/proxy `/models` metadata wins over models.dev metadata.
+Existing models are overridden by default so the wrapper/proxy `/models` metadata wins over models.dev metadata. With the default `overrideExisting: true`, providers expose only models returned by the `/models` endpoint. This is especially useful for custom `openai` base URLs because opencode otherwise starts from its built-in OpenAI model catalog.
 
 If the model list does not expose max output tokens, the plugin uses `128000` as `limit.output`.
 
@@ -102,7 +102,7 @@ Supported options:
 - `cachePath`: global option for cache file location.
 - `providers.include`: optional allowlist; empty or omitted means include all matching providers.
 - `providers.exclude`: skip these provider ids.
-- `overrideExisting`: defaults to `true`.
+- `overrideExisting`: defaults to `true`; when `true`, providers expose only discovered models. When `false`, discovered models are merged into the existing model catalog without replacing existing definitions.
 
 Default cache path:
 
