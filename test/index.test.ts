@@ -70,7 +70,11 @@ test("uses the discovered ID for OpenAI API requests", async (t) => {
     globalThis.fetch = originalFetch
   })
 
-  const hooks = await plugin({} as never, { cachePath: join(directory, "cache.json") })
+  const hooks = await plugin({} as never, {
+    cachePath: join(directory, "cache.json"),
+    fallbackContextTokens: 16_000,
+    fallbackOutputTokens: 2_000,
+  })
   await hooks.config?.({ provider: { openai: { options: { baseURL: "https://proxy.example/v1" } } } } as never)
 
   const template = providerModel("template-model")
@@ -88,6 +92,7 @@ test("uses the discovered ID for OpenAI API requests", async (t) => {
 
   assert.equal(models?.["discovered-model"].id, "discovered-model")
   assert.equal(models?.["discovered-model"].api.id, "discovered-model")
+  assert.deepEqual(models?.["discovered-model"].limit, { context: 16_000, output: 2_000 })
 })
 
 test("does not copy model-specific metadata into newly discovered OpenAI models", async (t) => {
@@ -228,6 +233,27 @@ test("maps output limits without requiring context metadata", async (t) => {
     id: "output-only",
     name: "output-only",
     limit: { output: 4_096 },
+  })
+})
+
+test("does not invent output limits for custom providers", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => Response.json({ data: [{ id: "context-only", metadata: { context_window: 8_000 } }] })
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  const hooks = await plugin({} as never, { cachePath: join(directory, "cache.json") })
+  const config = compatibleConfig()
+  await hooks.config?.(config as never)
+
+  assert.deepEqual(config.provider.proxy.models?.["context-only"], {
+    id: "context-only",
+    name: "context-only",
+    limit: { context: 8_000 },
   })
 })
 

@@ -41,6 +41,8 @@ type OpenCodeConfig = {
 type ProviderDiscoveryOptions = {
   refreshIntervalMs?: number
   refreshIntervalHours?: number
+  fallbackContextTokens?: number
+  fallbackOutputTokens?: number
   include?: string[]
   exclude?: string[]
   overrideExisting?: boolean
@@ -50,6 +52,8 @@ type PluginOptions = {
   enabled?: boolean
   refreshIntervalMs?: number
   refreshIntervalHours?: number
+  fallbackContextTokens?: number
+  fallbackOutputTokens?: number
   cachePath?: string
   providers?: {
     include?: string[]
@@ -92,7 +96,6 @@ type Cache = {
 
 const DEFAULT_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000
 const DEFAULT_CACHE_PATH = join(homedir(), ".cache", "opencode-models-discovery", "models-cache.json")
-const DEFAULT_MAX_OUTPUT_TOKENS = 128_000
 const OPENAI_SDKS = new Set(["@ai-sdk/openai", "@ai-sdk/openai-compatible"])
 
 const plugin: Plugin = async (_input, options = {}) => {
@@ -176,7 +179,14 @@ const plugin: Plugin = async (_input, options = {}) => {
           }
         }
 
-        return models?.length ? applyProviderModels(provider, models, providerOptions.overrideExisting ?? pluginOptions.overrideExisting) : provider.models
+        return models?.length
+          ? applyProviderModels(
+              provider,
+              models,
+              providerOptions.overrideExisting ?? pluginOptions.overrideExisting,
+              providerOptions,
+            )
+          : provider.models
       },
     },
   }
@@ -186,6 +196,8 @@ function normalizePluginOptions(options: PluginOptions) {
   return {
     enabled: options.enabled,
     refreshIntervalMs: intervalMs(options.refreshIntervalMs, options.refreshIntervalHours),
+    fallbackContextTokens: tokenLimit(options.fallbackContextTokens),
+    fallbackOutputTokens: tokenLimit(options.fallbackOutputTokens),
     cachePath: options.cachePath ?? DEFAULT_CACHE_PATH,
     providers: options.providers ?? {},
     overrideExisting: options.overrideExisting ?? true,
@@ -195,6 +207,8 @@ function normalizePluginOptions(options: PluginOptions) {
 function normalizeProviderOptions(options: ProviderDiscoveryOptions | undefined, pluginOptions: ReturnType<typeof normalizePluginOptions>) {
   return {
     refreshIntervalMs: intervalMs(options?.refreshIntervalMs, options?.refreshIntervalHours, pluginOptions.refreshIntervalMs),
+    fallbackContextTokens: tokenLimit(options?.fallbackContextTokens) ?? pluginOptions.fallbackContextTokens,
+    fallbackOutputTokens: tokenLimit(options?.fallbackOutputTokens) ?? pluginOptions.fallbackOutputTokens,
     include: options?.include ?? pluginOptions.providers.include,
     exclude: options?.exclude ?? pluginOptions.providers.exclude,
     overrideExisting: options?.overrideExisting,
@@ -205,6 +219,10 @@ function intervalMs(ms?: number, hours?: number, fallback = DEFAULT_REFRESH_INTE
   if (typeof ms === "number" && Number.isFinite(ms) && ms >= 0) return ms
   if (typeof hours === "number" && Number.isFinite(hours) && hours >= 0) return hours * 60 * 60 * 1000
   return fallback
+}
+
+function tokenLimit(value: number | undefined) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined
 }
 
 function shouldHandleProvider(providerID: string, provider: ProviderConfig) {
@@ -307,7 +325,12 @@ function applyModels(provider: ProviderConfig, models: RemoteModel[], overrideEx
   }
 }
 
-function applyProviderModels(provider: ProviderInfo, models: RemoteModel[], overrideExisting: boolean) {
+function applyProviderModels(
+  provider: ProviderInfo,
+  models: RemoteModel[],
+  overrideExisting: boolean,
+  options: Pick<ReturnType<typeof normalizeProviderOptions>, "fallbackContextTokens" | "fallbackOutputTokens">,
+) {
   const next = overrideExisting ? {} : { ...provider.models }
   const template = Object.values(provider.models)[0]
 
@@ -321,7 +344,7 @@ function applyProviderModels(provider: ProviderInfo, models: RemoteModel[], over
 
     const base = existing
       ? providerModelBase(provider, existing, remote)
-      : discoveredProviderModel(provider, template, remote)
+      : discoveredProviderModel(provider, template, remote, options)
     const applied = applyRemoteToProviderModel(base, remote)
     next[id] = applied
 
@@ -336,7 +359,12 @@ function applyProviderModels(provider: ProviderInfo, models: RemoteModel[], over
   return next
 }
 
-function discoveredProviderModel(provider: ProviderInfo, template: ProviderModel, remote: RemoteModel): ProviderModel {
+function discoveredProviderModel(
+  provider: ProviderInfo,
+  template: ProviderModel,
+  remote: RemoteModel,
+  options: Pick<ReturnType<typeof normalizeProviderOptions>, "fallbackContextTokens" | "fallbackOutputTokens">,
+): ProviderModel {
   const metadata = remote.metadata ?? {}
   const id = modelID(remote) ?? template.id
 
@@ -355,7 +383,10 @@ function discoveredProviderModel(provider: ProviderInfo, template: ProviderModel
       interleaved: false,
     },
     cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
-    limit: { context: DEFAULT_MAX_OUTPUT_TOKENS, output: DEFAULT_MAX_OUTPUT_TOKENS },
+    limit: {
+      context: options.fallbackContextTokens ?? template.limit.context,
+      output: options.fallbackOutputTokens ?? template.limit.output,
+    },
     status: "active",
     options: {},
     headers: {},
@@ -390,13 +421,12 @@ function applyRemoteToProviderModel(existing: ProviderModel, remote: RemoteModel
     remote.context,
   )
   const input = numberValue(metadata.input_context_window, metadata.input, remote.input_context_window, remote.input)
-  const discoveredOutput = numberValue(
+  const output = numberValue(
     metadata.max_output_tokens,
     metadata.output,
     remote.max_output_tokens,
     remote.output,
   )
-  const output = discoveredOutput ?? DEFAULT_MAX_OUTPUT_TOKENS
   const inputModalities = stringArray(metadata.input_modalities, remote.input_modalities, architecture?.input_modalities)
   const outputModalities = stringArray(metadata.output_modalities, remote.output_modalities, architecture?.output_modalities)
 
@@ -407,7 +437,7 @@ function applyRemoteToProviderModel(existing: ProviderModel, remote: RemoteModel
       ...existing.limit,
       ...(context !== undefined ? { context } : {}),
       ...(input !== undefined ? { input } : {}),
-      output,
+      ...(output !== undefined ? { output } : {}),
     },
     capabilities: {
       ...existing.capabilities,
