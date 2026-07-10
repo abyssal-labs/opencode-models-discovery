@@ -620,7 +620,15 @@ test("times out discovery requests", async (t) => {
   const originalFetch = globalThis.fetch
   globalThis.fetch = async (_input, init) =>
     new Promise<Response>((_resolve, reject) => {
-      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true })
+      const timer = setTimeout(() => reject(new Error("Mock fetch did not receive an abort signal")), 1_000)
+      init?.signal?.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(timer)
+          reject(init.signal?.reason)
+        },
+        { once: true },
+      )
     })
   t.after(() => {
     globalThis.fetch = originalFetch
