@@ -135,9 +135,6 @@ const plugin: Plugin = async (_input, options = {}) => {
             models = discovered
             cache.providers[cacheKey] = { checkedAt: now, models }
             cacheChanged = true
-          } else if (cached) {
-            cache.providers[cacheKey] = { ...cached, checkedAt: now }
-            cacheChanged = true
           }
         }
 
@@ -175,9 +172,6 @@ const plugin: Plugin = async (_input, options = {}) => {
           if (discovered) {
             models = discovered
             cache.providers[cacheKey] = { checkedAt: now, models }
-            await writeCache(pluginOptions.cachePath, cache)
-          } else if (cached) {
-            cache.providers[cacheKey] = { ...cached, checkedAt: now }
             await writeCache(pluginOptions.cachePath, cache)
           }
         }

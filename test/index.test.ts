@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
@@ -171,6 +171,55 @@ test("preserves existing OpenAI models when overriding is disabled", async (t) =
   assert.strictEqual(models?.["existing-model"], existing)
   assert.equal(models?.["new-model"].name, "New Model")
 })
+
+test("retries discovery after a transient failure", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const cachePath = join(directory, "cache.json")
+
+  const responses = [
+    Response.json({ data: [{ id: "stale-model" }] }),
+    new Response("unavailable", { status: 503 }),
+    Response.json({ data: [{ id: "fresh-model" }] }),
+  ]
+  const originalFetch = globalThis.fetch
+  let fetchCount = 0
+  globalThis.fetch = async () => responses[fetchCount++]
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  const staleHooks = await plugin({} as never, { cachePath, refreshIntervalMs: 0 })
+  await staleHooks.config?.(compatibleConfig() as never)
+
+  const cache = JSON.parse(await readFile(cachePath, "utf8"))
+  const cacheKey = Object.keys(cache.providers)[0]
+  cache.providers[cacheKey].checkedAt = 0
+  await writeFile(cachePath, JSON.stringify(cache))
+
+  const failedHooks = await plugin({} as never, { cachePath })
+  const failedConfig = compatibleConfig()
+  await failedHooks.config?.(failedConfig as never)
+  assert.ok(failedConfig.provider.proxy.models?.["stale-model"])
+
+  const retryHooks = await plugin({} as never, { cachePath })
+  const retryConfig = compatibleConfig()
+  await retryHooks.config?.(retryConfig as never)
+  assert.equal(fetchCount, 3)
+  assert.ok(retryConfig.provider.proxy.models?.["fresh-model"])
+})
+
+function compatibleConfig() {
+  return {
+    provider: {
+      proxy: {
+        npm: "@ai-sdk/openai-compatible",
+        options: { baseURL: "https://proxy.example/v1" },
+        models: undefined as Record<string, unknown> | undefined,
+      },
+    },
+  }
+}
 
 function providerModel(id: string) {
   return {
