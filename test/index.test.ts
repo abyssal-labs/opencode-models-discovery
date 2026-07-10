@@ -683,10 +683,8 @@ test("maps custom modes and speed tiers", async (t) => {
     headers: { "x-mode": "fast" },
     cost: { input: 2, output: 4 },
   })
-  assert.equal(
-    (config.provider.proxy.models?.["tiered-model-flex"] as { options: { serviceTier: string } }).options.serviceTier,
-    "flex-tier",
-  )
+  const flex = config.provider.proxy.models?.["tiered-model-flex"] as { options: { serviceTier: string } } | undefined
+  assert.equal(flex?.options.serviceTier, "flex-tier")
 })
 
 test("discovers models from a real HTTP endpoint", async (t) => {
