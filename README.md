@@ -114,6 +114,8 @@ Supported options:
 - `providers.exclude`: skip these provider ids.
 - `overrideExisting`: defaults to `true`; when `true`, providers expose only discovered models. When `false`, discovered models are merged into the existing model catalog without replacing existing definitions.
 
+Invalid values and unknown option names are rejected during plugin initialization so configuration mistakes fail visibly.
+
 Default cache path:
 
 ```text

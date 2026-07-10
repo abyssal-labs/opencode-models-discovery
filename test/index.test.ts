@@ -461,6 +461,11 @@ test("honors XDG_CACHE_HOME for the default cache", async (t) => {
   await access(join(directory, "opencode-models-discovery", "models-cache.json"))
 })
 
+test("rejects invalid and unknown plugin options", async () => {
+  await assert.rejects(plugin({} as never, { maxResponseBytes: 0 }), /maxResponseBytes has an invalid value/)
+  await assert.rejects(plugin({} as never, { refreshIntervlMs: 1 }), /refreshIntervlMs is not supported/)
+})
+
 function compatibleConfig() {
   return {
     provider: {

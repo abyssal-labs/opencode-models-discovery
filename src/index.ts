@@ -99,6 +99,7 @@ const DEFAULT_MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 const OPENAI_SDKS = new Set(["@ai-sdk/openai", "@ai-sdk/openai-compatible"])
 
 const plugin: Plugin = async (_input, options = {}) => {
+  validatePluginOptions(options)
   const pluginOptions = normalizePluginOptions(options as PluginOptions)
   const capturedProviders = new Map<string, ProviderConfig>()
 
@@ -199,7 +200,9 @@ function defaultCachePath() {
   return join(root, "opencode-models-discovery", "models-cache.json")
 }
 
-function normalizeProviderOptions(options: ProviderDiscoveryOptions | undefined, pluginOptions: ReturnType<typeof normalizePluginOptions>) {
+function normalizeProviderOptions(value: unknown, pluginOptions: ReturnType<typeof normalizePluginOptions>) {
+  validateProviderOptions(value)
+  const options = value as ProviderDiscoveryOptions | undefined
   return {
     refreshIntervalMs: intervalMs(options?.refreshIntervalMs, options?.refreshIntervalHours, pluginOptions.refreshIntervalMs),
     fallbackContextTokens: tokenLimit(options?.fallbackContextTokens) ?? pluginOptions.fallbackContextTokens,
@@ -210,6 +213,103 @@ function normalizeProviderOptions(options: ProviderDiscoveryOptions | undefined,
     exclude: options?.exclude ?? pluginOptions.providers.exclude,
     overrideExisting: options?.overrideExisting,
   }
+}
+
+function validatePluginOptions(value: unknown): asserts value is PluginOptions {
+  const options = requireOptionsObject(value, "plugin options")
+  const allowed = new Set([
+    "enabled",
+    "refreshIntervalMs",
+    "refreshIntervalHours",
+    "fallbackContextTokens",
+    "fallbackOutputTokens",
+    "maxResponseBytes",
+    "cachePath",
+    "providers",
+    "overrideExisting",
+    "headers",
+  ])
+  rejectUnknownOptions(options, allowed, "plugin options")
+  validateCommonOptions(options, "plugin options")
+  if (options.enabled !== undefined && typeof options.enabled !== "boolean") invalidOption("plugin options", "enabled")
+  if (options.cachePath !== undefined && (typeof options.cachePath !== "string" || !options.cachePath.trim())) {
+    invalidOption("plugin options", "cachePath")
+  }
+  if (options.overrideExisting !== undefined && typeof options.overrideExisting !== "boolean") {
+    invalidOption("plugin options", "overrideExisting")
+  }
+  if (options.providers !== undefined) {
+    const providers = requireOptionsObject(options.providers, "plugin options.providers")
+    rejectUnknownOptions(providers, new Set(["include", "exclude"]), "plugin options.providers")
+    validateStringArray(providers.include, "plugin options.providers", "include")
+    validateStringArray(providers.exclude, "plugin options.providers", "exclude")
+  }
+}
+
+function validateProviderOptions(value: unknown): asserts value is ProviderDiscoveryOptions | undefined {
+  if (value === undefined) return
+  const options = requireOptionsObject(value, "provider modelsDiscovery options")
+  rejectUnknownOptions(
+    options,
+    new Set([
+      "refreshIntervalMs",
+      "refreshIntervalHours",
+      "fallbackContextTokens",
+      "fallbackOutputTokens",
+      "maxResponseBytes",
+      "include",
+      "exclude",
+      "overrideExisting",
+      "headers",
+    ]),
+    "provider modelsDiscovery options",
+  )
+  validateCommonOptions(options, "provider modelsDiscovery options")
+  validateStringArray(options.include, "provider modelsDiscovery options", "include")
+  validateStringArray(options.exclude, "provider modelsDiscovery options", "exclude")
+  if (options.overrideExisting !== undefined && typeof options.overrideExisting !== "boolean") {
+    invalidOption("provider modelsDiscovery options", "overrideExisting")
+  }
+}
+
+function validateCommonOptions(options: Record<string, unknown>, scope: string) {
+  for (const key of ["refreshIntervalMs", "refreshIntervalHours"] as const) {
+    const value = options[key]
+    if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value) || value < 0)) {
+      invalidOption(scope, key)
+    }
+  }
+  for (const key of ["fallbackContextTokens", "fallbackOutputTokens", "maxResponseBytes"] as const) {
+    const value = options[key]
+    if (value !== undefined && (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0)) {
+      invalidOption(scope, key)
+    }
+  }
+  if (options.headers !== undefined) {
+    const headers = requireOptionsObject(options.headers, `${scope}.headers`)
+    if (Object.values(headers).some((header) => typeof header !== "string")) invalidOption(scope, "headers")
+  }
+}
+
+function requireOptionsObject(value: unknown, scope: string) {
+  const options = objectValue(value)
+  if (!options) throw new TypeError(`${scope} must be an object`)
+  return options
+}
+
+function rejectUnknownOptions(options: Record<string, unknown>, allowed: Set<string>, scope: string) {
+  const unknown = Object.keys(options).find((key) => !allowed.has(key))
+  if (unknown) throw new TypeError(`${scope}.${unknown} is not supported`)
+}
+
+function validateStringArray(value: unknown, scope: string, key: string) {
+  if (value !== undefined && (!Array.isArray(value) || value.some((item) => typeof item !== "string"))) {
+    invalidOption(scope, key)
+  }
+}
+
+function invalidOption(scope: string, key: string): never {
+  throw new TypeError(`${scope}.${key} has an invalid value`)
 }
 
 function intervalMs(ms?: number, hours?: number, fallback = DEFAULT_REFRESH_INTERVAL_MS) {
