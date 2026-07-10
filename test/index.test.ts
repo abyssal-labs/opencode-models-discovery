@@ -90,6 +90,49 @@ test("uses the discovered ID for OpenAI API requests", async (t) => {
   assert.equal(models?.["discovered-model"].api.id, "discovered-model")
 })
 
+test("does not copy model-specific metadata into newly discovered OpenAI models", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () =>
+    Response.json({ data: [{ id: "discovered-model", metadata: { context_window: 8_000, max_output_tokens: 1_000 } }] })
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  const hooks = await plugin({} as never, { cachePath: join(directory, "cache.json") })
+  await hooks.config?.({ provider: { openai: { options: { baseURL: "https://proxy.example/v1" } } } } as never)
+  const models = await hooks.provider?.models?.(
+    {
+      id: "openai",
+      name: "OpenAI",
+      source: "config",
+      env: [],
+      options: {},
+      models: { "template-model": providerModel("template-model") },
+    },
+    {},
+  )
+
+  const discovered = models?.["discovered-model"]
+  assert.deepEqual(discovered?.capabilities, {
+    temperature: false,
+    reasoning: false,
+    attachment: false,
+    toolcall: false,
+    input: { text: true, audio: false, image: false, video: false, pdf: false },
+    output: { text: true, audio: false, image: false, video: false, pdf: false },
+    interleaved: false,
+  })
+  assert.deepEqual(discovered?.cost, { input: 0, output: 0, cache: { read: 0, write: 0 } })
+  assert.deepEqual(discovered?.limit, { context: 8_000, output: 1_000 })
+  assert.equal(discovered?.status, "active")
+  assert.equal(discovered?.release_date, "")
+  assert.deepEqual(discovered?.options, {})
+  assert.deepEqual(discovered?.headers, {})
+})
+
 function providerModel(id: string) {
   return {
     id,

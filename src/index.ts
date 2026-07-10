@@ -321,10 +321,13 @@ function applyProviderModels(provider: ProviderInfo, models: RemoteModel[], over
     const id = modelID(remote)
     if (!id) continue
 
-    const existing = provider.models[id] ?? template
-    if (!existing) continue
+    const existing = provider.models[id]
+    if (!existing && !template) continue
 
-    const applied = applyRemoteToProviderModel(providerModelBase(provider, existing, remote), remote)
+    const base = existing
+      ? providerModelBase(provider, existing, remote)
+      : discoveredProviderModel(provider, template, remote)
+    const applied = applyRemoteToProviderModel(base, remote)
     next[id] = applied
 
     for (const [mode, modeConfig] of Object.entries(remoteModes(remote))) {
@@ -336,6 +339,33 @@ function applyProviderModels(provider: ProviderInfo, models: RemoteModel[], over
   }
 
   return next
+}
+
+function discoveredProviderModel(provider: ProviderInfo, template: ProviderModel, remote: RemoteModel): ProviderModel {
+  const metadata = remote.metadata ?? {}
+  const id = modelID(remote) ?? template.id
+
+  return {
+    id,
+    providerID: provider.id,
+    api: { ...template.api, id },
+    name: stringValue(remote.name, metadata.display_name, remote.display_name, id) ?? id,
+    capabilities: {
+      temperature: false,
+      reasoning: false,
+      attachment: false,
+      toolcall: false,
+      input: { text: true, audio: false, image: false, video: false, pdf: false },
+      output: { text: true, audio: false, image: false, video: false, pdf: false },
+      interleaved: false,
+    },
+    cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+    limit: { context: DEFAULT_MAX_OUTPUT_TOKENS, output: DEFAULT_MAX_OUTPUT_TOKENS },
+    status: "active",
+    options: {},
+    headers: {},
+    release_date: "",
+  }
 }
 
 function providerModelBase(provider: ProviderInfo, existing: ProviderModel, remote: RemoteModel): ProviderModel {
