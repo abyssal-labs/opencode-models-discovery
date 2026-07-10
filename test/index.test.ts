@@ -341,6 +341,23 @@ test("constructs the models URL without corrupting query parameters", async (t) 
   assert.equal(requestedURL, "https://proxy.example/v1/models?api-version=2026-01-01")
 })
 
+test("ignores malformed model entries without discarding valid models", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => Response.json({ data: [null, 42, {}, { id: "valid-model" }] })
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  const hooks = await plugin({} as never, { cachePath: join(directory, "cache.json") })
+  const config = compatibleConfig()
+  await hooks.config?.(config as never)
+
+  assert.deepEqual(Object.keys(config.provider.proxy.models ?? {}), ["valid-model"])
+})
+
 function compatibleConfig() {
   return {
     provider: {

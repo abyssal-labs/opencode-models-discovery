@@ -63,11 +63,6 @@ type PluginOptions = {
   overrideExisting?: boolean
 }
 
-type ModelsResponse = {
-  data?: RemoteModel[]
-  models?: RemoteModel[]
-}
-
 type RemoteModel = {
   id?: string
   slug?: string
@@ -256,9 +251,21 @@ async function fetchModels(input: { baseURL: string; apiKey?: string }) {
     })
     if (!response.ok) return undefined
 
-    const body = (await response.json()) as ModelsResponse | RemoteModel[]
-    const models = Array.isArray(body) ? body : body.data ?? body.models ?? []
-    return models.filter((model) => modelID(model) !== undefined)
+    const body = (await response.json()) as unknown
+    const responseObject = objectValue(body)
+    const values = Array.isArray(body)
+      ? body
+      : Array.isArray(responseObject?.data)
+        ? responseObject.data
+        : Array.isArray(responseObject?.models)
+          ? responseObject.models
+          : undefined
+    if (!values) return undefined
+
+    const models = values
+      .map(objectValue)
+      .filter((model): model is RemoteModel => model !== undefined && modelID(model) !== undefined)
+    return values.length > 0 && models.length === 0 ? undefined : models
   } catch {
     return undefined
   }
