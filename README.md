@@ -32,6 +32,19 @@ Existing models are overridden by default so the wrapper/proxy `/models` metadat
 
 Unknown limits are left unchanged for existing models. Newly discovered OpenAI models use the provider template's limits unless `fallbackContextTokens` or `fallbackOutputTokens` is configured.
 
+## Modes and service tiers
+
+The plugin creates additional model entries when a response provides `experimental.modes`, `modes`, or `additional_speed_tiers`. A mode named `fast` for model `example` becomes `example-fast`.
+
+Mode metadata can provide:
+
+- `provider.body`, converted from snake_case to opencode option names.
+- `provider.headers`, restricted to string values.
+- `cost`, including input, output, cache-read, and cache-write prices.
+- Service tiers through `additional_speed_tiers` and `service_tiers`; these set the OpenAI `serviceTier` request option.
+
+Paginated responses can use `next_page`, `next`, or `has_more` with `last_id`. Continuation URLs must remain on the original origin.
+
 ## Usage
 
 ```json
@@ -133,5 +146,19 @@ Default cache path:
 ```
 
 `XDG_CACHE_HOME` is honored when set. On Windows, `LOCALAPPDATA` is used before the home-directory fallback.
+
+## Compatibility
+
+- Tested against `@opencode-ai/plugin` 1.17.x.
+- Published output is standard ESM and requires Node.js 20 or newer when imported outside opencode.
+- Discovery endpoints must use HTTP or HTTPS and return an array, `{ "data": [] }`, or `{ "models": [] }`.
+
+## Troubleshooting
+
+Discovery failures are written to opencode logs under the `opencode-models-discovery` service. Logs include the provider, sanitized endpoint, HTTP status when available, and whether stale cache data was used. Credentials and URL query strings are not logged.
+
+Set `refreshIntervalMs` to `0` to force discovery during each startup while debugging. Delete the cache file to discard all previously discovered metadata.
+
+Release history and upgrade notes are available on the [GitHub Releases](https://github.com/abyssal-labs/opencode-models-discovery/releases) page.
 
 Restart opencode after changing plugin or config files.
