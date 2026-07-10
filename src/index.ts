@@ -344,6 +344,9 @@ function matchesProviderFilter(providerID: string, options: ReturnType<typeof no
 
 function modelsURL(baseURL: string) {
   const url = new URL(baseURL)
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new TypeError("Discovery baseURL must use HTTP or HTTPS")
+  }
   url.pathname = `${url.pathname.replace(/\/+$/, "")}/models`
   url.hash = ""
   return url
