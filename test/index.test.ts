@@ -294,6 +294,31 @@ test("treats a successful empty response as authoritative", async (t) => {
   assert.deepEqual(config.provider.proxy.models, {})
 })
 
+test("gives provider exclusions precedence over inclusions", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+
+  const originalFetch = globalThis.fetch
+  let fetched = false
+  globalThis.fetch = async () => {
+    fetched = true
+    return Response.json({ data: [{ id: "model" }] })
+  }
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  const hooks = await plugin({} as never, {
+    cachePath: join(directory, "cache.json"),
+    providers: { include: ["proxy"], exclude: ["proxy"] },
+  })
+  const config = compatibleConfig()
+  await hooks.config?.(config as never)
+
+  assert.equal(fetched, false)
+  assert.equal(config.provider.proxy.models, undefined)
+})
+
 function compatibleConfig() {
   return {
     provider: {

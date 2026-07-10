@@ -233,8 +233,8 @@ function shouldHandleProvider(providerID: string, provider: ProviderConfig) {
 }
 
 function matchesProviderFilter(providerID: string, options: ReturnType<typeof normalizeProviderOptions>) {
+  if (options.exclude?.includes(providerID)) return false
   if (options.include?.length) return options.include.includes(providerID)
-  if (options.exclude?.length) return !options.exclude.includes(providerID)
   return true
 }
 
