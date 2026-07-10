@@ -209,6 +209,28 @@ test("retries discovery after a transient failure", async (t) => {
   assert.ok(retryConfig.provider.proxy.models?.["fresh-model"])
 })
 
+test("maps output limits without requiring context metadata", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () =>
+    Response.json({ data: [{ id: "output-only", metadata: { max_output_tokens: 4_096 } }] })
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  const hooks = await plugin({} as never, { cachePath: join(directory, "cache.json") })
+  const config = compatibleConfig()
+  await hooks.config?.(config as never)
+
+  assert.deepEqual(config.provider.proxy.models?.["output-only"], {
+    id: "output-only",
+    name: "output-only",
+    limit: { output: 4_096 },
+  })
+})
+
 function compatibleConfig() {
   return {
     provider: {

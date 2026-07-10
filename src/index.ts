@@ -390,9 +390,13 @@ function applyRemoteToProviderModel(existing: ProviderModel, remote: RemoteModel
     remote.context,
   )
   const input = numberValue(metadata.input_context_window, metadata.input, remote.input_context_window, remote.input)
-  const output =
-    numberValue(metadata.max_output_tokens, metadata.output, remote.max_output_tokens, remote.output) ??
-    DEFAULT_MAX_OUTPUT_TOKENS
+  const discoveredOutput = numberValue(
+    metadata.max_output_tokens,
+    metadata.output,
+    remote.max_output_tokens,
+    remote.output,
+  )
+  const output = discoveredOutput ?? DEFAULT_MAX_OUTPUT_TOKENS
   const inputModalities = stringArray(metadata.input_modalities, remote.input_modalities, architecture?.input_modalities)
   const outputModalities = stringArray(metadata.output_modalities, remote.output_modalities, architecture?.output_modalities)
 
@@ -433,9 +437,12 @@ function mapRemoteModel(remote: RemoteModel, existing: ModelConfig): ModelConfig
     remote.context,
   )
   const input = numberValue(metadata.input_context_window, metadata.input, remote.input_context_window, remote.input)
-  const output =
-    numberValue(metadata.max_output_tokens, metadata.output, remote.max_output_tokens, remote.output) ??
-    DEFAULT_MAX_OUTPUT_TOKENS
+  const discoveredOutput = numberValue(
+    metadata.max_output_tokens,
+    metadata.output,
+    remote.max_output_tokens,
+    remote.output,
+  )
   const id = modelID(remote)
   if (!id) return undefined
 
@@ -444,9 +451,11 @@ function mapRemoteModel(remote: RemoteModel, existing: ModelConfig): ModelConfig
     name: existing.name ?? stringValue(remote.name, metadata.display_name, remote.display_name, id),
   }
 
-  if (context !== undefined) {
-    mapped.limit = { context, output }
+  if (context !== undefined || input !== undefined || discoveredOutput !== undefined) {
+    mapped.limit = {}
+    if (context !== undefined) mapped.limit.context = context
     if (input !== undefined) mapped.limit.input = input
+    if (discoveredOutput !== undefined) mapped.limit.output = discoveredOutput
   }
 
   const inputModalities = stringArray(metadata.input_modalities, remote.input_modalities, architecture?.input_modalities)
