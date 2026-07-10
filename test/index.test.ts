@@ -59,3 +59,57 @@ test("discovers models for an OpenAI-compatible provider", async (t) => {
     },
   })
 })
+
+test("uses the discovered ID for OpenAI API requests", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => Response.json({ data: [{ id: "discovered-model" }] })
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  const hooks = await plugin({} as never, { cachePath: join(directory, "cache.json") })
+  await hooks.config?.({ provider: { openai: { options: { baseURL: "https://proxy.example/v1" } } } } as never)
+
+  const template = providerModel("template-model")
+  const models = await hooks.provider?.models?.(
+    {
+      id: "openai",
+      name: "OpenAI",
+      source: "config",
+      env: [],
+      options: {},
+      models: { "template-model": template },
+    },
+    {},
+  )
+
+  assert.equal(models?.["discovered-model"].id, "discovered-model")
+  assert.equal(models?.["discovered-model"].api.id, "discovered-model")
+})
+
+function providerModel(id: string) {
+  return {
+    id,
+    providerID: "openai",
+    api: { id, url: "https://proxy.example/v1", npm: "@ai-sdk/openai" },
+    name: "Template Model",
+    capabilities: {
+      temperature: true,
+      reasoning: true,
+      attachment: true,
+      toolcall: true,
+      input: { text: true, audio: false, image: true, video: false, pdf: true },
+      output: { text: true, audio: false, image: false, video: false, pdf: false },
+      interleaved: false,
+    },
+    cost: { input: 10, output: 20, cache: { read: 1, write: 2 } },
+    limit: { context: 1_000, output: 100 },
+    status: "active" as const,
+    options: { templateOption: true },
+    headers: { "x-template": "true" },
+    release_date: "2025-01-01",
+  }
+}

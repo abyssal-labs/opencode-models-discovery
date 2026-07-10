@@ -346,6 +346,7 @@ function providerModelBase(provider: ProviderInfo, existing: ProviderModel, remo
     ...existing,
     id,
     providerID: provider.id,
+    api: { ...existing.api, id },
     name: stringValue(remote.name, metadata.display_name, remote.display_name, id) ?? id,
     options: { ...existing.options },
     headers: { ...existing.headers },
