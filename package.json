@@ -16,8 +16,9 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "test": "node --test --experimental-strip-types test/**/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "npm run typecheck"
+    "prepublishOnly": "npm test && npm run typecheck"
   },
   "publishConfig": {
     "access": "public",
