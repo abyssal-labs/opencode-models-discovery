@@ -1,0 +1,56 @@
+name: Bug report
+description: Report incorrect model discovery behavior
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Remove credentials and private provider metadata before submitting.
+  - type: input
+    id: version
+    attributes:
+      label: Plugin version
+      placeholder: 0.1.2
+    validations:
+      required: true
+  - type: input
+    id: opencode
+    attributes:
+      label: opencode version
+    validations:
+      required: true
+  - type: textarea
+    id: configuration
+    attributes:
+      label: Sanitized configuration
+      description: Include the provider and plugin options with all secrets removed.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: response
+    attributes:
+      label: Sanitized models response
+      description: Include the smallest response shape that reproduces the issue.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and logs
+      description: Include logs from the opencode-models-discovery service after removing sensitive values.
+    validations:
+      required: true

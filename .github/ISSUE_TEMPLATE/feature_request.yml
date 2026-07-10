@@ -1,0 +1,28 @@
+name: Feature request
+description: Suggest a model-discovery compatibility improvement
+title: "feat: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the provider or workflow that is not currently supported.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: response
+    attributes:
+      label: Example response
+      description: Provide a sanitized endpoint response or specification link when applicable.
+      render: json
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
