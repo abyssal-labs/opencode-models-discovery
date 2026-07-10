@@ -257,6 +257,25 @@ test("does not invent output limits for custom providers", async (t) => {
   })
 })
 
+test("ignores malformed cache data", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const cachePath = join(directory, "cache.json")
+  await writeFile(cachePath, JSON.stringify({ providers: "invalid" }))
+
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => Response.json({ data: [{ id: "valid-model" }] })
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  const hooks = await plugin({} as never, { cachePath })
+  const config = compatibleConfig()
+  await hooks.config?.(config as never)
+
+  assert.ok(config.provider.proxy.models?.["valid-model"])
+})
+
 function compatibleConfig() {
   return {
     provider: {

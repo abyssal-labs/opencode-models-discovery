@@ -651,8 +651,22 @@ function expandEnv(value: string | undefined) {
 
 async function readCache(path: string): Promise<Cache> {
   try {
-    const parsed = JSON.parse(await readFile(path, "utf8")) as Cache
-    if (parsed && typeof parsed === "object" && parsed.providers) return parsed
+    const parsed = objectValue(JSON.parse(await readFile(path, "utf8")))
+    const providers = objectValue(parsed?.providers)
+    if (!providers) return { providers: {} }
+
+    const valid: Cache["providers"] = {}
+    for (const [key, value] of Object.entries(providers)) {
+      const entry = objectValue(value)
+      const checkedAt = numberValue(entry?.checkedAt)
+      if (checkedAt === undefined || checkedAt < 0 || !Array.isArray(entry?.models)) continue
+
+      const models = entry.models
+        .map(objectValue)
+        .filter((model): model is RemoteModel => model !== undefined && modelID(model) !== undefined)
+      valid[key] = { checkedAt, models }
+    }
+    return { providers: valid }
   } catch {
     // Missing or invalid cache should not break opencode startup.
   }
