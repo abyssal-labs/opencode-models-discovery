@@ -239,8 +239,10 @@ function matchesProviderFilter(providerID: string, options: ReturnType<typeof no
 }
 
 function modelsURL(baseURL: string) {
-  const base = baseURL.replace(/\/+$/, "")
-  return `${base}/models`
+  const url = new URL(baseURL)
+  url.pathname = `${url.pathname.replace(/\/+$/, "")}/models`
+  url.hash = ""
+  return url
 }
 
 async function fetchModels(input: { baseURL: string; apiKey?: string }) {

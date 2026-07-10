@@ -319,6 +319,28 @@ test("gives provider exclusions precedence over inclusions", async (t) => {
   assert.equal(config.provider.proxy.models, undefined)
 })
 
+test("constructs the models URL without corrupting query parameters", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+
+  const originalFetch = globalThis.fetch
+  let requestedURL = ""
+  globalThis.fetch = async (input) => {
+    requestedURL = input.toString()
+    return Response.json({ data: [] })
+  }
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  const hooks = await plugin({} as never, { cachePath: join(directory, "cache.json") })
+  const config = compatibleConfig()
+  config.provider.proxy.options.baseURL = "https://proxy.example/v1/?api-version=2026-01-01#ignored"
+  await hooks.config?.(config as never)
+
+  assert.equal(requestedURL, "https://proxy.example/v1/models?api-version=2026-01-01")
+})
+
 function compatibleConfig() {
   return {
     provider: {
