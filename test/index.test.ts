@@ -491,11 +491,13 @@ test("logs discovery failures without exposing credentials", async (t) => {
   )
   const config = compatibleConfig()
   config.provider.proxy.options.apiKey = "must-not-be-logged"
+  config.provider.proxy.options.baseURL = "https://user:password@proxy.example/v1?token=query-secret"
   await hooks.config?.(config as never)
 
   assert.equal(logs.length, 1)
   assert.match(JSON.stringify(logs[0]), /503/)
   assert.doesNotMatch(JSON.stringify(logs[0]), /must-not-be-logged/)
+  assert.doesNotMatch(JSON.stringify(logs[0]), /password|query-secret/)
 })
 
 function compatibleConfig() {

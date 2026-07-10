@@ -384,7 +384,7 @@ async function refreshModels(
   if (!result.ok) {
     await input.log("Model discovery failed", {
       providerID: input.providerID,
-      baseURL: input.baseURL,
+      baseURL: redactedURL(input.baseURL),
       reason: result.reason,
       ...(result.status === undefined ? {} : { status: result.status }),
       usingStaleCache: cached !== undefined,
@@ -394,6 +394,19 @@ async function refreshModels(
 
   cache.providers[cacheKey] = { checkedAt: now, models: result.models }
   return { models: result.models, changed: true }
+}
+
+function redactedURL(value: string) {
+  try {
+    const url = new URL(value)
+    url.username = ""
+    url.password = ""
+    url.search = ""
+    url.hash = ""
+    return url.toString()
+  } catch {
+    return "invalid URL"
+  }
 }
 
 async function fetchModels(input: {
