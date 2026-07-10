@@ -1,6 +1,7 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises"
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { homedir } from "node:os"
+import { randomUUID } from "node:crypto"
 import type { Plugin } from "@opencode-ai/plugin"
 import type { Model as ProviderModel, Provider as ProviderInfo } from "@opencode-ai/sdk/v2"
 
@@ -675,7 +676,13 @@ async function readCache(path: string): Promise<Cache> {
 
 async function writeCache(path: string, cache: Cache) {
   await mkdir(dirname(path), { recursive: true })
-  await writeFile(path, `${JSON.stringify(cache, null, 2)}\n`)
+  const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`
+  try {
+    await writeFile(temporaryPath, `${JSON.stringify(cache, null, 2)}\n`, { mode: 0o600 })
+    await rename(temporaryPath, path)
+  } finally {
+    await rm(temporaryPath, { force: true })
+  }
 }
 
 export default plugin
