@@ -576,10 +576,7 @@ test("follows bounded same-origin model pagination", async (t) => {
   const config = compatibleConfig()
   await hooks.config?.(config as never)
 
-  assert.deepEqual(requestedURLs, [
-    "https://proxy.example/v1/models",
-    "https://proxy.example/v1/models?after=first",
-  ])
+  assert.deepEqual(requestedURLs, ["https://proxy.example/v1/models", "https://proxy.example/v1/models?after=first"])
   assert.deepEqual(Object.keys(config.provider.proxy.models ?? {}), ["first", "second"])
 })
 
