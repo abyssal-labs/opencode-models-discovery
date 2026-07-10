@@ -65,7 +65,15 @@ test("uses the discovered ID for OpenAI API requests", async (t) => {
   t.after(() => rm(directory, { recursive: true, force: true }))
 
   const originalFetch = globalThis.fetch
-  globalThis.fetch = async () => Response.json({ data: [{ id: "discovered-model" }] })
+  globalThis.fetch = async () =>
+    Response.json({
+      data: [
+        {
+          id: "discovered-model",
+          modes: { fast: { provider: { body: { service_tier: "priority" } } } },
+        },
+      ],
+    })
   t.after(() => {
     globalThis.fetch = originalFetch
   })
@@ -93,6 +101,9 @@ test("uses the discovered ID for OpenAI API requests", async (t) => {
   assert.equal(models?.["discovered-model"].id, "discovered-model")
   assert.equal(models?.["discovered-model"].api.id, "discovered-model")
   assert.deepEqual(models?.["discovered-model"].limit, { context: 16_000, output: 2_000 })
+  assert.equal(models?.["discovered-model-fast"].id, "discovered-model-fast")
+  assert.equal(models?.["discovered-model-fast"].api.id, "discovered-model")
+  assert.equal(models?.["discovered-model-fast"].options.serviceTier, "priority")
 })
 
 test("does not copy model-specific metadata into newly discovered OpenAI models", async (t) => {
@@ -622,6 +633,51 @@ test("times out discovery requests", async (t) => {
   await hooks.config?.(config as never)
 
   assert.equal(config.provider.proxy.models, undefined)
+})
+
+test("maps custom modes and speed tiers", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () =>
+    Response.json({
+      data: [
+        {
+          id: "tiered-model",
+          modes: {
+            fast: {
+              cost: { input: 2, output: 4 },
+              provider: {
+                body: { service_tier: "priority" },
+                headers: { "x-mode": "fast", ignored: 42 },
+              },
+            },
+          },
+          additional_speed_tiers: ["flex"],
+          service_tiers: [{ id: "flex-tier", name: "flex" }],
+        },
+      ],
+    })
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  const hooks = await plugin({} as never, { cachePath: join(directory, "cache.json") })
+  const config = compatibleConfig()
+  await hooks.config?.(config as never)
+
+  assert.deepEqual(config.provider.proxy.models?.["tiered-model-fast"], {
+    id: "tiered-model-fast",
+    name: "tiered-model Fast",
+    options: { serviceTier: "priority" },
+    headers: { "x-mode": "fast" },
+    cost: { input: 2, output: 4 },
+  })
+  assert.equal(
+    (config.provider.proxy.models?.["tiered-model-flex"] as { options: { serviceTier: string } }).options.serviceTier,
+    "flex-tier",
+  )
 })
 
 function providerConfig(providerID: string, baseURL: string) {
