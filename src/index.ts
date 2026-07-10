@@ -653,19 +653,34 @@ function applyRemoteToProviderModel(existing: ProviderModel, remote: RemoteModel
     metadata.context_window,
     metadata.context_length,
     metadata.context,
+    metadata.max_model_len,
+    metadata.max_context_length,
     remote.context_window,
     remote.context_length,
     remote.context,
+    remote.max_model_len,
+    remote.max_context_length,
   )
-  const input = numberValue(metadata.input_context_window, metadata.input, remote.input_context_window, remote.input)
+  const input = numberValue(
+    metadata.input_context_window,
+    metadata.max_input_tokens,
+    metadata.input,
+    remote.input_context_window,
+    remote.max_input_tokens,
+    remote.input,
+  )
   const output = numberValue(
     metadata.max_output_tokens,
+    metadata.max_completion_tokens,
+    metadata.max_tokens,
     metadata.output,
     remote.max_output_tokens,
+    remote.max_completion_tokens,
+    remote.max_tokens,
     remote.output,
   )
-  const inputModalities = stringArray(metadata.input_modalities, remote.input_modalities, architecture?.input_modalities)
-  const outputModalities = stringArray(metadata.output_modalities, remote.output_modalities, architecture?.output_modalities)
+  const inputModalities = modelModalities(metadata.input_modalities, remote.input_modalities, architecture?.input_modalities)
+  const outputModalities = modelModalities(metadata.output_modalities, remote.output_modalities, architecture?.output_modalities)
 
   return {
     ...existing,
@@ -699,15 +714,30 @@ function mapRemoteModel(remote: RemoteModel, existing: ModelConfig): ModelConfig
     metadata.context_window,
     metadata.context_length,
     metadata.context,
+    metadata.max_model_len,
+    metadata.max_context_length,
     remote.context_window,
     remote.context_length,
     remote.context,
+    remote.max_model_len,
+    remote.max_context_length,
   )
-  const input = numberValue(metadata.input_context_window, metadata.input, remote.input_context_window, remote.input)
+  const input = numberValue(
+    metadata.input_context_window,
+    metadata.max_input_tokens,
+    metadata.input,
+    remote.input_context_window,
+    remote.max_input_tokens,
+    remote.input,
+  )
   const discoveredOutput = numberValue(
     metadata.max_output_tokens,
+    metadata.max_completion_tokens,
+    metadata.max_tokens,
     metadata.output,
     remote.max_output_tokens,
+    remote.max_completion_tokens,
+    remote.max_tokens,
     remote.output,
   )
   const id = modelID(remote)
@@ -725,8 +755,8 @@ function mapRemoteModel(remote: RemoteModel, existing: ModelConfig): ModelConfig
     if (discoveredOutput !== undefined) mapped.limit.output = discoveredOutput
   }
 
-  const inputModalities = stringArray(metadata.input_modalities, remote.input_modalities, architecture?.input_modalities)
-  const outputModalities = stringArray(metadata.output_modalities, remote.output_modalities, architecture?.output_modalities)
+  const inputModalities = modelModalities(metadata.input_modalities, remote.input_modalities, architecture?.input_modalities)
+  const outputModalities = modelModalities(metadata.output_modalities, remote.output_modalities, architecture?.output_modalities)
   if (inputModalities || outputModalities) {
     mapped.modalities = {
       input: inputModalities ?? existing.modalities?.input ?? ["text"],
@@ -870,6 +900,12 @@ function stringArray(...values: unknown[]) {
     if (Array.isArray(value) && value.every((item) => typeof item === "string")) return value
   }
   return undefined
+}
+
+function modelModalities(...values: unknown[]) {
+  const modalities = stringArray(...values)
+  if (!modalities) return undefined
+  return [...new Set(modalities.map((modality) => (modality.toLowerCase() === "vision" ? "image" : modality.toLowerCase())))]
 }
 
 function arrayValue(...values: unknown[]) {

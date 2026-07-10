@@ -523,6 +523,38 @@ test("rejects non-HTTP discovery URLs", async (t) => {
   assert.equal(config.provider.proxy.models, undefined)
 })
 
+test("maps common limit aliases and normalizes modalities", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () =>
+    Response.json({
+      data: [
+        {
+          id: "aliased-model",
+          max_model_len: 64_000,
+          max_tokens: 4_000,
+          input_modalities: ["TEXT", "vision"],
+        },
+      ],
+    })
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  const hooks = await plugin({} as never, { cachePath: join(directory, "cache.json") })
+  const config = compatibleConfig()
+  await hooks.config?.(config as never)
+
+  assert.deepEqual(config.provider.proxy.models?.["aliased-model"], {
+    id: "aliased-model",
+    name: "aliased-model",
+    limit: { context: 64_000, output: 4_000 },
+    modalities: { input: ["text", "image"], output: ["text"] },
+  })
+})
+
 function compatibleConfig() {
   return {
     provider: {

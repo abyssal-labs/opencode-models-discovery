@@ -16,13 +16,17 @@ For every discovered model, it maps endpoint metadata into opencode model config
 
 - `metadata.context_window` -> `limit.context`
 - `metadata.context_length` or top-level `context_length` -> `limit.context`
+- `max_model_len` and `max_context_length` -> `limit.context`
 - `metadata.input_context_window` -> `limit.input`
 - `metadata.max_output_tokens` -> `limit.output`
+- `max_completion_tokens` and `max_tokens` -> `limit.output`
 - `metadata.display_name` -> `name`
 - `metadata.input_modalities` -> `modalities.input`
 - `metadata.output_modalities` -> `modalities.output`
 - `architecture.input_modalities` -> `modalities.input`
 - `architecture.output_modalities` -> `modalities.output`
+
+Modality names are normalized to lowercase, and `vision` is normalized to `image` for opencode compatibility.
 
 Existing models are overridden by default so the wrapper/proxy `/models` metadata wins over models.dev metadata. With the default `overrideExisting: true`, providers expose only models returned by the `/models` endpoint. This is especially useful for custom `openai` base URLs because opencode otherwise starts from its built-in OpenAI model catalog.
 
