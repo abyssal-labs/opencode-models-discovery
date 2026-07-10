@@ -1,7 +1,8 @@
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
+import { mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { homedir } from "node:os"
 import { createHash, randomUUID } from "node:crypto"
+import { setTimeout as delay } from "node:timers/promises"
 import type { Plugin } from "@opencode-ai/plugin"
 import type { Model as ProviderModel, Provider as ProviderInfo } from "@opencode-ai/sdk/v2"
 
@@ -1001,13 +1002,54 @@ async function readCache(path: string): Promise<Cache> {
 
 async function writeCache(path: string, cache: Cache) {
   await mkdir(dirname(path), { recursive: true })
-  const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`
+  const release = await acquireCacheLock(path)
   try {
-    await writeFile(temporaryPath, `${JSON.stringify(cache, null, 2)}\n`, { mode: 0o600 })
-    await rename(temporaryPath, path)
+    const current = await readCache(path)
+    const merged: Cache = { providers: { ...current.providers } }
+    for (const [key, entry] of Object.entries(cache.providers)) {
+      if (!merged.providers[key] || entry.checkedAt >= merged.providers[key].checkedAt) {
+        merged.providers[key] = entry
+      }
+    }
+
+    const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`
+    try {
+      await writeFile(temporaryPath, `${JSON.stringify(merged, null, 2)}\n`, { mode: 0o600 })
+      await rename(temporaryPath, path)
+      cache.providers = merged.providers
+    } finally {
+      await rm(temporaryPath, { force: true })
+    }
   } finally {
-    await rm(temporaryPath, { force: true })
+    await release()
   }
+}
+
+async function acquireCacheLock(path: string) {
+  const lockPath = `${path}.lock`
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      const handle = await open(lockPath, "wx", 0o600)
+      return async () => {
+        await handle.close()
+        await rm(lockPath, { force: true })
+      }
+    } catch (error) {
+      if (!isFileExistsError(error)) throw error
+      try {
+        const lock = await stat(lockPath)
+        if (Date.now() - lock.mtimeMs > 30_000) await rm(lockPath, { force: true })
+      } catch {
+        // Another process released the lock while it was being inspected.
+      }
+      await delay(25)
+    }
+  }
+  throw new Error(`Timed out waiting for model cache lock: ${path}`)
+}
+
+function isFileExistsError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error && error.code === "EEXIST"
 }
 
 export default plugin

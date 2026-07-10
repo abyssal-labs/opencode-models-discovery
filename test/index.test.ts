@@ -583,6 +583,38 @@ test("follows bounded same-origin model pagination", async (t) => {
   assert.deepEqual(Object.keys(config.provider.proxy.models ?? {}), ["first", "second"])
 })
 
+test("merges concurrent cache updates", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const cachePath = join(directory, "cache.json")
+
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (input) => Response.json({ data: [{ id: new URL(input.toString()).hostname }] })
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  const firstHooks = await plugin({} as never, { cachePath })
+  const secondHooks = await plugin({} as never, { cachePath })
+  const firstConfig = providerConfig("first", "https://first.example/v1")
+  const secondConfig = providerConfig("second", "https://second.example/v1")
+  await Promise.all([firstHooks.config?.(firstConfig as never), secondHooks.config?.(secondConfig as never)])
+
+  const cache = JSON.parse(await readFile(cachePath, "utf8"))
+  assert.equal(Object.keys(cache.providers).length, 2)
+})
+
+function providerConfig(providerID: string, baseURL: string) {
+  return {
+    provider: {
+      [providerID]: {
+        npm: "@ai-sdk/openai-compatible",
+        options: { baseURL },
+      },
+    },
+  }
+}
+
 function compatibleConfig() {
   return {
     provider: {
