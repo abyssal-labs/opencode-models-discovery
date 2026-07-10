@@ -40,7 +40,7 @@ type OpenCodeConfig = {
   provider?: Record<string, ProviderConfig>
 }
 
-type ProviderDiscoveryOptions = {
+export type ProviderDiscoveryOptions = {
   refreshIntervalMs?: number
   refreshIntervalHours?: number
   fallbackContextTokens?: number
@@ -53,7 +53,7 @@ type ProviderDiscoveryOptions = {
   overrideExisting?: boolean
 }
 
-type PluginOptions = {
+export type PluginOptions = {
   enabled?: boolean
   refreshIntervalMs?: number
   refreshIntervalHours?: number

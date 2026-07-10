@@ -122,6 +122,8 @@ Supported options:
 
 Invalid values and unknown option names are rejected during plugin initialization so configuration mistakes fail visibly.
 
+TypeScript consumers can import `PluginOptions` and `ProviderDiscoveryOptions` from the package.
+
 Default cache path:
 
 ```text
