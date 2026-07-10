@@ -322,6 +322,7 @@ function applyProviderModels(provider: ProviderInfo, models: RemoteModel[], over
     if (!id) continue
 
     const existing = provider.models[id]
+    if (!overrideExisting && existing) continue
     if (!existing && !template) continue
 
     const base = existing

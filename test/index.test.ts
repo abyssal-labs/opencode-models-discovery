@@ -133,6 +133,45 @@ test("does not copy model-specific metadata into newly discovered OpenAI models"
   assert.deepEqual(discovered?.headers, {})
 })
 
+test("preserves existing OpenAI models when overriding is disabled", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () =>
+    Response.json({
+      data: [
+        { id: "existing-model", name: "Remote Name", metadata: { context_window: 8_000 } },
+        { id: "new-model", name: "New Model", metadata: { context_window: 4_000 } },
+      ],
+    })
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  const hooks = await plugin({} as never, {
+    cachePath: join(directory, "cache.json"),
+    overrideExisting: false,
+  })
+  await hooks.config?.({ provider: { openai: { options: { baseURL: "https://proxy.example/v1" } } } } as never)
+
+  const existing = providerModel("existing-model")
+  const models = await hooks.provider?.models?.(
+    {
+      id: "openai",
+      name: "OpenAI",
+      source: "config",
+      env: [],
+      options: {},
+      models: { "existing-model": existing },
+    },
+    {},
+  )
+
+  assert.strictEqual(models?.["existing-model"], existing)
+  assert.equal(models?.["new-model"].name, "New Model")
+})
+
 function providerModel(id: string) {
   return {
     id,
