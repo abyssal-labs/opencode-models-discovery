@@ -45,6 +45,7 @@ type ProviderDiscoveryOptions = {
   fallbackContextTokens?: number
   fallbackOutputTokens?: number
   maxResponseBytes?: number
+  maxPages?: number
   headers?: Record<string, string>
   include?: string[]
   exclude?: string[]
@@ -58,6 +59,7 @@ type PluginOptions = {
   fallbackContextTokens?: number
   fallbackOutputTokens?: number
   maxResponseBytes?: number
+  maxPages?: number
   headers?: Record<string, string>
   cachePath?: string
   providers?: {
@@ -96,6 +98,7 @@ type Cache = {
 
 const DEFAULT_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000
 const DEFAULT_MAX_RESPONSE_BYTES = 5 * 1024 * 1024
+const DEFAULT_MAX_PAGES = 10
 const OPENAI_SDKS = new Set(["@ai-sdk/openai", "@ai-sdk/openai-compatible"])
 
 const plugin: Plugin = async (input, options = {}) => {
@@ -133,6 +136,7 @@ const plugin: Plugin = async (input, options = {}) => {
           apiKey,
           headers,
           maxResponseBytes: providerOptions.maxResponseBytes,
+          maxPages: providerOptions.maxPages,
           refreshIntervalMs: providerOptions.refreshIntervalMs,
           log: (message, extra) => writeLog(input, message, extra),
         })
@@ -167,6 +171,7 @@ const plugin: Plugin = async (input, options = {}) => {
           apiKey,
           headers,
           maxResponseBytes: providerOptions.maxResponseBytes,
+          maxPages: providerOptions.maxPages,
           refreshIntervalMs: providerOptions.refreshIntervalMs,
           log: (message, extra) => writeLog(input, message, extra),
         })
@@ -192,6 +197,7 @@ function normalizePluginOptions(options: PluginOptions) {
     fallbackContextTokens: tokenLimit(options.fallbackContextTokens),
     fallbackOutputTokens: tokenLimit(options.fallbackOutputTokens),
     maxResponseBytes: positiveInteger(options.maxResponseBytes) ?? DEFAULT_MAX_RESPONSE_BYTES,
+    maxPages: positiveInteger(options.maxPages) ?? DEFAULT_MAX_PAGES,
     headers: options.headers,
     cachePath: options.cachePath ?? defaultCachePath(),
     providers: options.providers ?? {},
@@ -212,6 +218,7 @@ function normalizeProviderOptions(value: unknown, pluginOptions: ReturnType<type
     fallbackContextTokens: tokenLimit(options?.fallbackContextTokens) ?? pluginOptions.fallbackContextTokens,
     fallbackOutputTokens: tokenLimit(options?.fallbackOutputTokens) ?? pluginOptions.fallbackOutputTokens,
     maxResponseBytes: positiveInteger(options?.maxResponseBytes) ?? pluginOptions.maxResponseBytes,
+    maxPages: positiveInteger(options?.maxPages) ?? pluginOptions.maxPages,
     headers: options?.headers ?? pluginOptions.headers,
     include: options?.include ?? pluginOptions.providers.include,
     exclude: options?.exclude ?? pluginOptions.providers.exclude,
@@ -228,6 +235,7 @@ function validatePluginOptions(value: unknown): asserts value is PluginOptions {
     "fallbackContextTokens",
     "fallbackOutputTokens",
     "maxResponseBytes",
+    "maxPages",
     "cachePath",
     "providers",
     "overrideExisting",
@@ -261,6 +269,7 @@ function validateProviderOptions(value: unknown): asserts value is ProviderDisco
       "fallbackContextTokens",
       "fallbackOutputTokens",
       "maxResponseBytes",
+      "maxPages",
       "include",
       "exclude",
       "overrideExisting",
@@ -283,7 +292,7 @@ function validateCommonOptions(options: Record<string, unknown>, scope: string) 
       invalidOption(scope, key)
     }
   }
-  for (const key of ["fallbackContextTokens", "fallbackOutputTokens", "maxResponseBytes"] as const) {
+  for (const key of ["fallbackContextTokens", "fallbackOutputTokens", "maxResponseBytes", "maxPages"] as const) {
     const value = options[key]
     if (value !== undefined && (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0)) {
       invalidOption(scope, key)
@@ -373,6 +382,7 @@ async function refreshModels(
     apiKey?: string
     headers?: Record<string, string>
     maxResponseBytes: number
+    maxPages: number
     refreshIntervalMs: number
     log: (message: string, extra: Record<string, unknown>) => Promise<void>
   },
@@ -417,42 +427,75 @@ async function fetchModels(input: {
   apiKey?: string
   headers?: Record<string, string>
   maxResponseBytes: number
+  maxPages: number
 }) {
   const headers = new Headers(input.headers)
   if (!headers.has("accept")) headers.set("accept", "application/json")
   if (input.apiKey && !headers.has("authorization")) headers.set("authorization", `Bearer ${input.apiKey}`)
 
   try {
-    const response = await fetch(modelsURL(input.baseURL), {
-      headers,
-      signal: AbortSignal.timeout(10_000),
-    })
-    if (!response.ok) return { ok: false as const, reason: "HTTP error", status: response.status }
+    const initialURL = modelsURL(input.baseURL)
+    let url = initialURL
+    const visited = new Set<string>()
+    const models = new Map<string, RemoteModel>()
 
-    const body = await responseJSON(response, input.maxResponseBytes)
-    const responseObject = objectValue(body)
-    const values = Array.isArray(body)
-      ? body
-      : Array.isArray(responseObject?.data)
-        ? responseObject.data
-        : Array.isArray(responseObject?.models)
-          ? responseObject.models
-          : undefined
-    if (!values) return { ok: false as const, reason: "Invalid or oversized JSON response" }
+    for (let page = 0; page < input.maxPages; page += 1) {
+      if (visited.has(url.href)) return { ok: false as const, reason: "Pagination loop detected" }
+      visited.add(url.href)
 
-    const models = values
-      .map(objectValue)
-      .filter((model): model is RemoteModel => model !== undefined && modelID(model) !== undefined)
-    if (values.length > 0 && models.length === 0) {
-      return { ok: false as const, reason: "Response contains no valid models" }
+      const response = await fetch(url, {
+        headers,
+        signal: AbortSignal.timeout(10_000),
+      })
+      if (!response.ok) return { ok: false as const, reason: "HTTP error", status: response.status }
+
+      const body = await responseJSON(response, input.maxResponseBytes)
+      const responseObject = objectValue(body)
+      const values = Array.isArray(body)
+        ? body
+        : Array.isArray(responseObject?.data)
+          ? responseObject.data
+          : Array.isArray(responseObject?.models)
+            ? responseObject.models
+            : undefined
+      if (!values) return { ok: false as const, reason: "Invalid or oversized JSON response" }
+
+      const pageModels = values
+        .map(objectValue)
+        .filter((model): model is RemoteModel => model !== undefined && modelID(model) !== undefined)
+      if (values.length > 0 && pageModels.length === 0) {
+        return { ok: false as const, reason: "Response contains no valid models" }
+      }
+      for (const model of pageModels) models.set(modelID(model)!, model)
+
+      const next = nextPageURL(responseObject, url)
+      if (!next) return { ok: true as const, models: [...models.values()] }
+      if (next.origin !== initialURL.origin) {
+        return { ok: false as const, reason: "Cross-origin pagination URL rejected" }
+      }
+      url = next
     }
-    return { ok: true as const, models }
+    return { ok: false as const, reason: `Pagination exceeded ${input.maxPages} pages` }
   } catch (error) {
     return {
       ok: false as const,
       reason: error instanceof Error ? error.message : "Unknown discovery error",
     }
   }
+}
+
+function nextPageURL(response: Record<string, unknown> | undefined, current: URL) {
+  if (!response) return undefined
+  const pagination = objectValue(response.pagination)
+  const next = stringValue(response.next_page, response.next, pagination?.next_page, pagination?.next)
+  if (next) return new URL(next, current)
+  if (response.has_more !== true) return undefined
+
+  const lastID = stringValue(response.last_id)
+  if (!lastID) return undefined
+  const url = new URL(current)
+  url.searchParams.set("after", lastID)
+  return url
 }
 
 async function writeLog(input: Parameters<Plugin>[0], message: string, extra: Record<string, unknown>) {

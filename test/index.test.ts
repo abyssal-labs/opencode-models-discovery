@@ -555,6 +555,34 @@ test("maps common limit aliases and normalizes modalities", async (t) => {
   })
 })
 
+test("follows bounded same-origin model pagination", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+
+  const originalFetch = globalThis.fetch
+  const requestedURLs: string[] = []
+  globalThis.fetch = async (input) => {
+    const url = input.toString()
+    requestedURLs.push(url)
+    return url.includes("after=first")
+      ? Response.json({ data: [{ id: "second" }], has_more: false })
+      : Response.json({ data: [{ id: "first" }], has_more: true, last_id: "first" })
+  }
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  const hooks = await plugin({} as never, { cachePath: join(directory, "cache.json") })
+  const config = compatibleConfig()
+  await hooks.config?.(config as never)
+
+  assert.deepEqual(requestedURLs, [
+    "https://proxy.example/v1/models",
+    "https://proxy.example/v1/models?after=first",
+  ])
+  assert.deepEqual(Object.keys(config.provider.proxy.models ?? {}), ["first", "second"])
+})
+
 function compatibleConfig() {
   return {
     provider: {
