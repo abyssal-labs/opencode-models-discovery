@@ -96,7 +96,6 @@ type Cache = {
 
 const DEFAULT_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000
 const DEFAULT_MAX_RESPONSE_BYTES = 5 * 1024 * 1024
-const DEFAULT_CACHE_PATH = join(homedir(), ".cache", "opencode-models-discovery", "models-cache.json")
 const OPENAI_SDKS = new Set(["@ai-sdk/openai", "@ai-sdk/openai-compatible"])
 
 const plugin: Plugin = async (_input, options = {}) => {
@@ -189,10 +188,15 @@ function normalizePluginOptions(options: PluginOptions) {
     fallbackOutputTokens: tokenLimit(options.fallbackOutputTokens),
     maxResponseBytes: positiveInteger(options.maxResponseBytes) ?? DEFAULT_MAX_RESPONSE_BYTES,
     headers: options.headers,
-    cachePath: options.cachePath ?? DEFAULT_CACHE_PATH,
+    cachePath: options.cachePath ?? defaultCachePath(),
     providers: options.providers ?? {},
     overrideExisting: options.overrideExisting ?? true,
   }
+}
+
+function defaultCachePath() {
+  const root = process.env.XDG_CACHE_HOME || process.env.LOCALAPPDATA || join(homedir(), ".cache")
+  return join(root, "opencode-models-discovery", "models-cache.json")
 }
 
 function normalizeProviderOptions(options: ProviderDiscoveryOptions | undefined, pluginOptions: ReturnType<typeof normalizePluginOptions>) {

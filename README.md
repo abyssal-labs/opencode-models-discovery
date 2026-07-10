@@ -120,4 +120,6 @@ Default cache path:
 ~/.cache/opencode-models-discovery/models-cache.json
 ```
 
+`XDG_CACHE_HOME` is honored when set. On Windows, `LOCALAPPDATA` is used before the home-directory fallback.
+
 Restart opencode after changing plugin or config files.

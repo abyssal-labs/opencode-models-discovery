@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
@@ -439,6 +439,26 @@ test("scopes cached models to discovery credentials", async (t) => {
   assert.equal(fetchCount, 2)
   assert.ok(secondConfig.provider.proxy.models?.["model-2"])
   assert.doesNotMatch(await readFile(cachePath, "utf8"), /first-key|second-key/)
+})
+
+test("honors XDG_CACHE_HOME for the default cache", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+
+  const originalCacheHome = process.env.XDG_CACHE_HOME
+  const originalFetch = globalThis.fetch
+  process.env.XDG_CACHE_HOME = directory
+  globalThis.fetch = async () => Response.json({ data: [] })
+  t.after(() => {
+    globalThis.fetch = originalFetch
+    if (originalCacheHome === undefined) delete process.env.XDG_CACHE_HOME
+    else process.env.XDG_CACHE_HOME = originalCacheHome
+  })
+
+  const hooks = await plugin({} as never)
+  await hooks.config?.(compatibleConfig() as never)
+
+  await access(join(directory, "opencode-models-discovery", "models-cache.json"))
 })
 
 function compatibleConfig() {
