@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { homedir } from "node:os"
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import type { Plugin } from "@opencode-ai/plugin"
 import type { Model as ProviderModel, Provider as ProviderInfo } from "@opencode-ai/sdk/v2"
 
@@ -124,11 +124,13 @@ const plugin: Plugin = async (_input, options = {}) => {
         // Native OpenAI OAuth/API providers have no custom baseURL; discovery is only for wrappers/proxies.
         if (!baseURL) continue
 
-        const cacheKey = `${providerID}:${baseURL}`
+        const apiKey = expandEnv(provider.options?.apiKey)
+        const headers = expandEnvRecord(providerOptions.headers)
+        const cacheKey = modelCacheKey(providerID, { baseURL, apiKey, headers })
         const refreshed = await refreshModels(cache, cacheKey, {
           baseURL,
-          apiKey: expandEnv(provider.options?.apiKey),
-          headers: expandEnvRecord(providerOptions.headers),
+          apiKey,
+          headers,
           maxResponseBytes: providerOptions.maxResponseBytes,
           refreshIntervalMs: providerOptions.refreshIntervalMs,
         })
@@ -154,11 +156,13 @@ const plugin: Plugin = async (_input, options = {}) => {
         if (!matchesProviderFilter(provider.id, providerOptions)) return provider.models
 
         const cache = await readCache(pluginOptions.cachePath)
-        const cacheKey = `${provider.id}:${baseURL}`
+        const apiKey = expandEnv(configProvider?.options?.apiKey)
+        const headers = expandEnvRecord(providerOptions.headers)
+        const cacheKey = modelCacheKey(provider.id, { baseURL, apiKey, headers })
         const refreshed = await refreshModels(cache, cacheKey, {
           baseURL,
-          apiKey: expandEnv(configProvider?.options?.apiKey),
-          headers: expandEnvRecord(providerOptions.headers),
+          apiKey,
+          headers,
           maxResponseBytes: providerOptions.maxResponseBytes,
           refreshIntervalMs: providerOptions.refreshIntervalMs,
         })
@@ -235,6 +239,18 @@ function modelsURL(baseURL: string) {
   url.pathname = `${url.pathname.replace(/\/+$/, "")}/models`
   url.hash = ""
   return url
+}
+
+function modelCacheKey(
+  providerID: string,
+  input: { baseURL: string; apiKey?: string; headers?: Record<string, string> },
+) {
+  const headers = Object.entries(input.headers ?? {}).sort(([left], [right]) => left.localeCompare(right))
+  const digest = createHash("sha256")
+    .update(JSON.stringify({ baseURL: input.baseURL, apiKey: input.apiKey, headers }))
+    .digest("hex")
+    .slice(0, 24)
+  return `${providerID}:${digest}`
 }
 
 async function refreshModels(

@@ -414,12 +414,39 @@ test("sends configured discovery headers", async (t) => {
   assert.equal(requestHeaders.get("accept"), "application/json")
 })
 
+test("scopes cached models to discovery credentials", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const cachePath = join(directory, "cache.json")
+
+  const originalFetch = globalThis.fetch
+  let fetchCount = 0
+  globalThis.fetch = async () => Response.json({ data: [{ id: `model-${++fetchCount}` }] })
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  const firstHooks = await plugin({} as never, { cachePath })
+  const firstConfig = compatibleConfig()
+  firstConfig.provider.proxy.options.apiKey = "first-key"
+  await firstHooks.config?.(firstConfig as never)
+
+  const secondHooks = await plugin({} as never, { cachePath })
+  const secondConfig = compatibleConfig()
+  secondConfig.provider.proxy.options.apiKey = "second-key"
+  await secondHooks.config?.(secondConfig as never)
+
+  assert.equal(fetchCount, 2)
+  assert.ok(secondConfig.provider.proxy.models?.["model-2"])
+  assert.doesNotMatch(await readFile(cachePath, "utf8"), /first-key|second-key/)
+})
+
 function compatibleConfig() {
   return {
     provider: {
       proxy: {
         npm: "@ai-sdk/openai-compatible",
-        options: { baseURL: "https://proxy.example/v1" },
+        options: { baseURL: "https://proxy.example/v1", apiKey: undefined as string | undefined },
         models: undefined as Record<string, unknown> | undefined,
       },
     },
