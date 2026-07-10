@@ -466,6 +466,38 @@ test("rejects invalid and unknown plugin options", async () => {
   await assert.rejects(plugin({} as never, { refreshIntervlMs: 1 }), /refreshIntervlMs is not supported/)
 })
 
+test("logs discovery failures without exposing credentials", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response("unavailable", { status: 503 })
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  const logs: unknown[] = []
+  const hooks = await plugin(
+    {
+      client: {
+        app: {
+          log: async (entry: unknown) => {
+            logs.push(entry)
+          },
+        },
+      },
+    } as never,
+    { cachePath: join(directory, "cache.json") },
+  )
+  const config = compatibleConfig()
+  config.provider.proxy.options.apiKey = "must-not-be-logged"
+  await hooks.config?.(config as never)
+
+  assert.equal(logs.length, 1)
+  assert.match(JSON.stringify(logs[0]), /503/)
+  assert.doesNotMatch(JSON.stringify(logs[0]), /must-not-be-logged/)
+})
+
 function compatibleConfig() {
   return {
     provider: {

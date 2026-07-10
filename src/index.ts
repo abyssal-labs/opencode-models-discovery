@@ -98,7 +98,7 @@ const DEFAULT_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000
 const DEFAULT_MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 const OPENAI_SDKS = new Set(["@ai-sdk/openai", "@ai-sdk/openai-compatible"])
 
-const plugin: Plugin = async (_input, options = {}) => {
+const plugin: Plugin = async (input, options = {}) => {
   validatePluginOptions(options)
   const pluginOptions = normalizePluginOptions(options as PluginOptions)
   const capturedProviders = new Map<string, ProviderConfig>()
@@ -128,11 +128,13 @@ const plugin: Plugin = async (_input, options = {}) => {
         const headers = expandEnvRecord(providerOptions.headers)
         const cacheKey = modelCacheKey(providerID, { baseURL, apiKey, headers })
         const refreshed = await refreshModels(cache, cacheKey, {
+          providerID,
           baseURL,
           apiKey,
           headers,
           maxResponseBytes: providerOptions.maxResponseBytes,
           refreshIntervalMs: providerOptions.refreshIntervalMs,
+          log: (message, extra) => writeLog(input, message, extra),
         })
         cacheChanged ||= refreshed.changed
 
@@ -160,11 +162,13 @@ const plugin: Plugin = async (_input, options = {}) => {
         const headers = expandEnvRecord(providerOptions.headers)
         const cacheKey = modelCacheKey(provider.id, { baseURL, apiKey, headers })
         const refreshed = await refreshModels(cache, cacheKey, {
+          providerID: provider.id,
           baseURL,
           apiKey,
           headers,
           maxResponseBytes: providerOptions.maxResponseBytes,
           refreshIntervalMs: providerOptions.refreshIntervalMs,
+          log: (message, extra) => writeLog(input, message, extra),
         })
         if (refreshed.changed) await writeCache(pluginOptions.cachePath, cache)
 
@@ -361,11 +365,13 @@ async function refreshModels(
   cache: Cache,
   cacheKey: string,
   input: {
+    providerID: string
     baseURL: string
     apiKey?: string
     headers?: Record<string, string>
     maxResponseBytes: number
     refreshIntervalMs: number
+    log: (message: string, extra: Record<string, unknown>) => Promise<void>
   },
 ) {
   const cached = cache.providers[cacheKey]
@@ -374,11 +380,20 @@ async function refreshModels(
     return { models: cached.models, changed: false }
   }
 
-  const discovered = await fetchModels(input)
-  if (!discovered) return { models: cached?.models, changed: false }
+  const result = await fetchModels(input)
+  if (!result.ok) {
+    await input.log("Model discovery failed", {
+      providerID: input.providerID,
+      baseURL: input.baseURL,
+      reason: result.reason,
+      ...(result.status === undefined ? {} : { status: result.status }),
+      usingStaleCache: cached !== undefined,
+    })
+    return { models: cached?.models, changed: false }
+  }
 
-  cache.providers[cacheKey] = { checkedAt: now, models: discovered }
-  return { models: discovered, changed: true }
+  cache.providers[cacheKey] = { checkedAt: now, models: result.models }
+  return { models: result.models, changed: true }
 }
 
 async function fetchModels(input: {
@@ -396,7 +411,7 @@ async function fetchModels(input: {
       headers,
       signal: AbortSignal.timeout(10_000),
     })
-    if (!response.ok) return undefined
+    if (!response.ok) return { ok: false as const, reason: "HTTP error", status: response.status }
 
     const body = await responseJSON(response, input.maxResponseBytes)
     const responseObject = objectValue(body)
@@ -407,14 +422,35 @@ async function fetchModels(input: {
         : Array.isArray(responseObject?.models)
           ? responseObject.models
           : undefined
-    if (!values) return undefined
+    if (!values) return { ok: false as const, reason: "Invalid or oversized JSON response" }
 
     const models = values
       .map(objectValue)
       .filter((model): model is RemoteModel => model !== undefined && modelID(model) !== undefined)
-    return values.length > 0 && models.length === 0 ? undefined : models
+    if (values.length > 0 && models.length === 0) {
+      return { ok: false as const, reason: "Response contains no valid models" }
+    }
+    return { ok: true as const, models }
+  } catch (error) {
+    return {
+      ok: false as const,
+      reason: error instanceof Error ? error.message : "Unknown discovery error",
+    }
+  }
+}
+
+async function writeLog(input: Parameters<Plugin>[0], message: string, extra: Record<string, unknown>) {
+  try {
+    await input.client.app.log({
+      body: {
+        service: "opencode-models-discovery",
+        level: "warn",
+        message,
+        extra,
+      },
+    })
   } catch {
-    return undefined
+    // Logging failures must not make provider initialization fail.
   }
 }
 
