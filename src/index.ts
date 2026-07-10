@@ -221,7 +221,11 @@ function normalizeProviderOptions(value: unknown, pluginOptions: ReturnType<type
   validateProviderOptions(value)
   const options = value as ProviderDiscoveryOptions | undefined
   return {
-    refreshIntervalMs: intervalMs(options?.refreshIntervalMs, options?.refreshIntervalHours, pluginOptions.refreshIntervalMs),
+    refreshIntervalMs: intervalMs(
+      options?.refreshIntervalMs,
+      options?.refreshIntervalHours,
+      pluginOptions.refreshIntervalMs,
+    ),
     fallbackContextTokens: tokenLimit(options?.fallbackContextTokens) ?? pluginOptions.fallbackContextTokens,
     fallbackOutputTokens: tokenLimit(options?.fallbackOutputTokens) ?? pluginOptions.fallbackOutputTokens,
     maxResponseBytes: positiveInteger(options?.maxResponseBytes) ?? pluginOptions.maxResponseBytes,
@@ -649,7 +653,9 @@ function applyProviderModels(
     for (const [mode, modeConfig] of Object.entries(remoteModes(remote))) {
       const modeID = `${id}-${mode}`
       const existingMode = next[modeID]
-      const baseMode = existingMode ? applyRemoteToProviderModel(existingMode, remote) : cloneProviderMode(applied, modeID, mode)
+      const baseMode = existingMode
+        ? applyRemoteToProviderModel(existingMode, remote)
+        : cloneProviderMode(applied, modeID, mode)
       next[modeID] = applyProviderModeConfig(baseMode, modeConfig)
     }
   }
@@ -740,8 +746,16 @@ function applyRemoteToProviderModel(existing: ProviderModel, remote: RemoteModel
     remote.max_tokens,
     remote.output,
   )
-  const inputModalities = modelModalities(metadata.input_modalities, remote.input_modalities, architecture?.input_modalities)
-  const outputModalities = modelModalities(metadata.output_modalities, remote.output_modalities, architecture?.output_modalities)
+  const inputModalities = modelModalities(
+    metadata.input_modalities,
+    remote.input_modalities,
+    architecture?.input_modalities,
+  )
+  const outputModalities = modelModalities(
+    metadata.output_modalities,
+    remote.output_modalities,
+    architecture?.output_modalities,
+  )
 
   return {
     ...existing,
@@ -754,7 +768,9 @@ function applyRemoteToProviderModel(existing: ProviderModel, remote: RemoteModel
     },
     capabilities: {
       ...existing.capabilities,
-      input: inputModalities ? modalitiesToCapabilities(inputModalities, existing.capabilities.input) : existing.capabilities.input,
+      input: inputModalities
+        ? modalitiesToCapabilities(inputModalities, existing.capabilities.input)
+        : existing.capabilities.input,
       output: outputModalities
         ? modalitiesToCapabilities(outputModalities, existing.capabilities.output)
         : existing.capabilities.output,
@@ -816,8 +832,16 @@ function mapRemoteModel(remote: RemoteModel, existing: ModelConfig): ModelConfig
     if (discoveredOutput !== undefined) mapped.limit.output = discoveredOutput
   }
 
-  const inputModalities = modelModalities(metadata.input_modalities, remote.input_modalities, architecture?.input_modalities)
-  const outputModalities = modelModalities(metadata.output_modalities, remote.output_modalities, architecture?.output_modalities)
+  const inputModalities = modelModalities(
+    metadata.input_modalities,
+    remote.input_modalities,
+    architecture?.input_modalities,
+  )
+  const outputModalities = modelModalities(
+    metadata.output_modalities,
+    remote.output_modalities,
+    architecture?.output_modalities,
+  )
   if (inputModalities || outputModalities) {
     mapped.modalities = {
       input: inputModalities ?? existing.modalities?.input ?? ["text"],
@@ -918,11 +942,15 @@ function applyProviderCost(existing: ProviderModel["cost"], cost: Record<string,
 }
 
 function camelizeKeys(values: Record<string, unknown>) {
-  return Object.fromEntries(Object.entries(values).map(([key, value]) => [key.replace(/_([a-z])/g, (_, char) => char.toUpperCase()), value]))
+  return Object.fromEntries(
+    Object.entries(values).map(([key, value]) => [key.replace(/_([a-z])/g, (_, char) => char.toUpperCase()), value]),
+  )
 }
 
 function stringRecord(values: Record<string, unknown>) {
-  return Object.fromEntries(Object.entries(values).filter((entry): entry is [string, string] => typeof entry[1] === "string"))
+  return Object.fromEntries(
+    Object.entries(values).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+  )
 }
 
 function titleCase(value: string) {
@@ -966,7 +994,9 @@ function stringArray(...values: unknown[]) {
 function modelModalities(...values: unknown[]) {
   const modalities = stringArray(...values)
   if (!modalities) return undefined
-  return [...new Set(modalities.map((modality) => (modality.toLowerCase() === "vision" ? "image" : modality.toLowerCase())))]
+  return [
+    ...new Set(modalities.map((modality) => (modality.toLowerCase() === "vision" ? "image" : modality.toLowerCase()))),
+  ]
 }
 
 function arrayValue(...values: unknown[]) {
