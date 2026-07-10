@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { createServer } from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
@@ -678,6 +679,34 @@ test("maps custom modes and speed tiers", async (t) => {
     (config.provider.proxy.models?.["tiered-model-flex"] as { options: { serviceTier: string } }).options.serviceTier,
     "flex-tier",
   )
+})
+
+test("discovers models from a real HTTP endpoint", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+
+  let requestURL = ""
+  let authorization = ""
+  const server = createServer((request, response) => {
+    requestURL = request.url ?? ""
+    authorization = request.headers.authorization ?? ""
+    response.setHeader("content-type", "application/json")
+    response.end(JSON.stringify({ data: [{ id: "http-model" }] }))
+  })
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+  t.after(() => new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve()))))
+
+  const address = server.address()
+  assert.ok(address && typeof address === "object")
+  const hooks = await plugin({} as never, { cachePath: join(directory, "cache.json") })
+  const config = compatibleConfig()
+  config.provider.proxy.options.baseURL = `http://127.0.0.1:${address.port}/v1`
+  config.provider.proxy.options.apiKey = "http-secret"
+  await hooks.config?.(config as never)
+
+  assert.equal(requestURL, "/v1/models")
+  assert.equal(authorization, "Bearer http-secret")
+  assert.ok(config.provider.proxy.models?.["http-model"])
 })
 
 function providerConfig(providerID: string, baseURL: string) {
