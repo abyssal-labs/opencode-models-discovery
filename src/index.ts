@@ -142,7 +142,7 @@ const plugin: Plugin = async (_input, options = {}) => {
           }
         }
 
-        if (models?.length) {
+        if (models) {
           const overrideExisting = providerOptions.overrideExisting ?? pluginOptions.overrideExisting
           if (overrideExisting) provider.models = {}
           applyModels(provider, models, overrideExisting)
@@ -180,7 +180,7 @@ const plugin: Plugin = async (_input, options = {}) => {
           }
         }
 
-        return models?.length
+        return models
           ? applyProviderModels(
               provider,
               models,

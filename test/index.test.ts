@@ -276,6 +276,24 @@ test("ignores malformed cache data", async (t) => {
   assert.ok(config.provider.proxy.models?.["valid-model"])
 })
 
+test("treats a successful empty response as authoritative", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => Response.json({ data: [] })
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  const hooks = await plugin({} as never, { cachePath: join(directory, "cache.json") })
+  const config = compatibleConfig()
+  config.provider.proxy.models = { existing: { id: "existing" } }
+  await hooks.config?.(config as never)
+
+  assert.deepEqual(config.provider.proxy.models, {})
+})
+
 function compatibleConfig() {
   return {
     provider: {
