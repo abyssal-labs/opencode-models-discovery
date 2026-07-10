@@ -123,28 +123,18 @@ const plugin: Plugin = async (_input, options = {}) => {
         if (!baseURL) continue
 
         const cacheKey = `${providerID}:${baseURL}`
-        const cached = cache.providers[cacheKey]
-        const now = Date.now()
-        const refreshIntervalMs = providerOptions.refreshIntervalMs ?? pluginOptions.refreshIntervalMs
+        const refreshed = await refreshModels(cache, cacheKey, {
+          baseURL,
+          apiKey: expandEnv(provider.options?.apiKey),
+          maxResponseBytes: providerOptions.maxResponseBytes,
+          refreshIntervalMs: providerOptions.refreshIntervalMs,
+        })
+        cacheChanged ||= refreshed.changed
 
-        let models = cached?.models
-        if (!cached || now - cached.checkedAt >= refreshIntervalMs) {
-          const discovered = await fetchModels({
-            baseURL,
-            apiKey: expandEnv(provider.options?.apiKey),
-            maxResponseBytes: providerOptions.maxResponseBytes,
-          })
-          if (discovered) {
-            models = discovered
-            cache.providers[cacheKey] = { checkedAt: now, models }
-            cacheChanged = true
-          }
-        }
-
-        if (models) {
+        if (refreshed.models) {
           const overrideExisting = providerOptions.overrideExisting ?? pluginOptions.overrideExisting
           if (overrideExisting) provider.models = {}
-          applyModels(provider, models, overrideExisting)
+          applyModels(provider, refreshed.models, overrideExisting)
         }
       }
 
@@ -162,28 +152,18 @@ const plugin: Plugin = async (_input, options = {}) => {
 
         const cache = await readCache(pluginOptions.cachePath)
         const cacheKey = `${provider.id}:${baseURL}`
-        const cached = cache.providers[cacheKey]
-        const now = Date.now()
-        const refreshIntervalMs = providerOptions.refreshIntervalMs ?? pluginOptions.refreshIntervalMs
+        const refreshed = await refreshModels(cache, cacheKey, {
+          baseURL,
+          apiKey: expandEnv(configProvider?.options?.apiKey),
+          maxResponseBytes: providerOptions.maxResponseBytes,
+          refreshIntervalMs: providerOptions.refreshIntervalMs,
+        })
+        if (refreshed.changed) await writeCache(pluginOptions.cachePath, cache)
 
-        let models = cached?.models
-        if (!cached || now - cached.checkedAt >= refreshIntervalMs) {
-          const discovered = await fetchModels({
-            baseURL,
-            apiKey: expandEnv(configProvider?.options?.apiKey),
-            maxResponseBytes: providerOptions.maxResponseBytes,
-          })
-          if (discovered) {
-            models = discovered
-            cache.providers[cacheKey] = { checkedAt: now, models }
-            await writeCache(pluginOptions.cachePath, cache)
-          }
-        }
-
-        return models
+        return refreshed.models
           ? applyProviderModels(
               provider,
-              models,
+              refreshed.models,
               providerOptions.overrideExisting ?? pluginOptions.overrideExisting,
               providerOptions,
             )
@@ -249,6 +229,24 @@ function modelsURL(baseURL: string) {
   url.pathname = `${url.pathname.replace(/\/+$/, "")}/models`
   url.hash = ""
   return url
+}
+
+async function refreshModels(
+  cache: Cache,
+  cacheKey: string,
+  input: { baseURL: string; apiKey?: string; maxResponseBytes: number; refreshIntervalMs: number },
+) {
+  const cached = cache.providers[cacheKey]
+  const now = Date.now()
+  if (cached && now - cached.checkedAt < input.refreshIntervalMs) {
+    return { models: cached.models, changed: false }
+  }
+
+  const discovered = await fetchModels(input)
+  if (!discovered) return { models: cached?.models, changed: false }
+
+  cache.providers[cacheKey] = { checkedAt: now, models: discovered }
+  return { models: discovered, changed: true }
 }
 
 async function fetchModels(input: { baseURL: string; apiKey?: string; maxResponseBytes: number }) {
