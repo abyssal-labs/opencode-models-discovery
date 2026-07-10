@@ -47,6 +47,7 @@ export type ProviderDiscoveryOptions = {
   fallbackOutputTokens?: number
   maxResponseBytes?: number
   maxPages?: number
+  timeoutMs?: number
   headers?: Record<string, string>
   include?: string[]
   exclude?: string[]
@@ -61,6 +62,7 @@ export type PluginOptions = {
   fallbackOutputTokens?: number
   maxResponseBytes?: number
   maxPages?: number
+  timeoutMs?: number
   headers?: Record<string, string>
   cachePath?: string
   providers?: {
@@ -100,6 +102,7 @@ type Cache = {
 const DEFAULT_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000
 const DEFAULT_MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 const DEFAULT_MAX_PAGES = 10
+const DEFAULT_TIMEOUT_MS = 10_000
 const OPENAI_SDKS = new Set(["@ai-sdk/openai", "@ai-sdk/openai-compatible"])
 
 const plugin: Plugin = async (input, options = {}) => {
@@ -138,6 +141,7 @@ const plugin: Plugin = async (input, options = {}) => {
           headers,
           maxResponseBytes: providerOptions.maxResponseBytes,
           maxPages: providerOptions.maxPages,
+          timeoutMs: providerOptions.timeoutMs,
           refreshIntervalMs: providerOptions.refreshIntervalMs,
           log: (message, extra) => writeLog(input, message, extra),
         })
@@ -173,6 +177,7 @@ const plugin: Plugin = async (input, options = {}) => {
           headers,
           maxResponseBytes: providerOptions.maxResponseBytes,
           maxPages: providerOptions.maxPages,
+          timeoutMs: providerOptions.timeoutMs,
           refreshIntervalMs: providerOptions.refreshIntervalMs,
           log: (message, extra) => writeLog(input, message, extra),
         })
@@ -199,6 +204,7 @@ function normalizePluginOptions(options: PluginOptions) {
     fallbackOutputTokens: tokenLimit(options.fallbackOutputTokens),
     maxResponseBytes: positiveInteger(options.maxResponseBytes) ?? DEFAULT_MAX_RESPONSE_BYTES,
     maxPages: positiveInteger(options.maxPages) ?? DEFAULT_MAX_PAGES,
+    timeoutMs: positiveInteger(options.timeoutMs) ?? DEFAULT_TIMEOUT_MS,
     headers: options.headers,
     cachePath: options.cachePath ?? defaultCachePath(),
     providers: options.providers ?? {},
@@ -220,6 +226,7 @@ function normalizeProviderOptions(value: unknown, pluginOptions: ReturnType<type
     fallbackOutputTokens: tokenLimit(options?.fallbackOutputTokens) ?? pluginOptions.fallbackOutputTokens,
     maxResponseBytes: positiveInteger(options?.maxResponseBytes) ?? pluginOptions.maxResponseBytes,
     maxPages: positiveInteger(options?.maxPages) ?? pluginOptions.maxPages,
+    timeoutMs: positiveInteger(options?.timeoutMs) ?? pluginOptions.timeoutMs,
     headers: options?.headers ?? pluginOptions.headers,
     include: options?.include ?? pluginOptions.providers.include,
     exclude: options?.exclude ?? pluginOptions.providers.exclude,
@@ -237,6 +244,7 @@ function validatePluginOptions(value: unknown): asserts value is PluginOptions {
     "fallbackOutputTokens",
     "maxResponseBytes",
     "maxPages",
+    "timeoutMs",
     "cachePath",
     "providers",
     "overrideExisting",
@@ -271,6 +279,7 @@ function validateProviderOptions(value: unknown): asserts value is ProviderDisco
       "fallbackOutputTokens",
       "maxResponseBytes",
       "maxPages",
+      "timeoutMs",
       "include",
       "exclude",
       "overrideExisting",
@@ -293,7 +302,13 @@ function validateCommonOptions(options: Record<string, unknown>, scope: string) 
       invalidOption(scope, key)
     }
   }
-  for (const key of ["fallbackContextTokens", "fallbackOutputTokens", "maxResponseBytes", "maxPages"] as const) {
+  for (const key of [
+    "fallbackContextTokens",
+    "fallbackOutputTokens",
+    "maxResponseBytes",
+    "maxPages",
+    "timeoutMs",
+  ] as const) {
     const value = options[key]
     if (value !== undefined && (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0)) {
       invalidOption(scope, key)
@@ -384,6 +399,7 @@ async function refreshModels(
     headers?: Record<string, string>
     maxResponseBytes: number
     maxPages: number
+    timeoutMs: number
     refreshIntervalMs: number
     log: (message: string, extra: Record<string, unknown>) => Promise<void>
   },
@@ -429,6 +445,7 @@ async function fetchModels(input: {
   headers?: Record<string, string>
   maxResponseBytes: number
   maxPages: number
+  timeoutMs: number
 }) {
   const headers = new Headers(input.headers)
   if (!headers.has("accept")) headers.set("accept", "application/json")
@@ -446,7 +463,7 @@ async function fetchModels(input: {
 
       const response = await fetch(url, {
         headers,
-        signal: AbortSignal.timeout(10_000),
+        signal: AbortSignal.timeout(input.timeoutMs),
       })
       if (!response.ok) return { ok: false as const, reason: "HTTP error", status: response.status }
 

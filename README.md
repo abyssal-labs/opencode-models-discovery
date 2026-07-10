@@ -71,6 +71,7 @@ Default refresh interval is 24 hours. Cached values are still applied on startup
         "fallbackOutputTokens": 16384,
         "maxResponseBytes": 5242880,
         "maxPages": 10,
+        "timeoutMs": 10000,
         "headers": {
           "x-api-key": "{env:DISCOVERY_API_KEY}"
         },
@@ -115,6 +116,7 @@ Supported options:
 - `fallbackOutputTokens`: optional output limit for newly discovered OpenAI models without output metadata.
 - `maxResponseBytes`: maximum discovery response size in bytes; defaults to 5 MiB.
 - `maxPages`: maximum number of same-origin discovery pages; defaults to `10`.
+- `timeoutMs`: timeout for each discovery page request; defaults to 10 seconds.
 - `headers`: additional headers for `/models` discovery; values support `{env:NAME}` expansion.
 - `providers.include`: optional allowlist; empty or omitted means include all matching providers.
 - `providers.exclude`: skip these provider ids.

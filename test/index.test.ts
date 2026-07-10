@@ -604,6 +604,29 @@ test("merges concurrent cache updates", async (t) => {
   assert.equal(Object.keys(cache.providers).length, 2)
 })
 
+test("times out discovery requests", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (_input, init) =>
+    new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true })
+    })
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  const hooks = await plugin({} as never, {
+    cachePath: join(directory, "cache.json"),
+    timeoutMs: 1,
+  })
+  const config = compatibleConfig()
+  await hooks.config?.(config as never)
+
+  assert.equal(config.provider.proxy.models, undefined)
+})
+
 function providerConfig(providerID: string, baseURL: string) {
   return {
     provider: {
