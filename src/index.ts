@@ -44,6 +44,7 @@ type ProviderDiscoveryOptions = {
   refreshIntervalHours?: number
   fallbackContextTokens?: number
   fallbackOutputTokens?: number
+  maxResponseBytes?: number
   include?: string[]
   exclude?: string[]
   overrideExisting?: boolean
@@ -55,6 +56,7 @@ type PluginOptions = {
   refreshIntervalHours?: number
   fallbackContextTokens?: number
   fallbackOutputTokens?: number
+  maxResponseBytes?: number
   cachePath?: string
   providers?: {
     include?: string[]
@@ -91,6 +93,7 @@ type Cache = {
 }
 
 const DEFAULT_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000
+const DEFAULT_MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 const DEFAULT_CACHE_PATH = join(homedir(), ".cache", "opencode-models-discovery", "models-cache.json")
 const OPENAI_SDKS = new Set(["@ai-sdk/openai", "@ai-sdk/openai-compatible"])
 
@@ -129,6 +132,7 @@ const plugin: Plugin = async (_input, options = {}) => {
           const discovered = await fetchModels({
             baseURL,
             apiKey: expandEnv(provider.options?.apiKey),
+            maxResponseBytes: providerOptions.maxResponseBytes,
           })
           if (discovered) {
             models = discovered
@@ -167,6 +171,7 @@ const plugin: Plugin = async (_input, options = {}) => {
           const discovered = await fetchModels({
             baseURL,
             apiKey: expandEnv(configProvider?.options?.apiKey),
+            maxResponseBytes: providerOptions.maxResponseBytes,
           })
           if (discovered) {
             models = discovered
@@ -194,6 +199,7 @@ function normalizePluginOptions(options: PluginOptions) {
     refreshIntervalMs: intervalMs(options.refreshIntervalMs, options.refreshIntervalHours),
     fallbackContextTokens: tokenLimit(options.fallbackContextTokens),
     fallbackOutputTokens: tokenLimit(options.fallbackOutputTokens),
+    maxResponseBytes: positiveInteger(options.maxResponseBytes) ?? DEFAULT_MAX_RESPONSE_BYTES,
     cachePath: options.cachePath ?? DEFAULT_CACHE_PATH,
     providers: options.providers ?? {},
     overrideExisting: options.overrideExisting ?? true,
@@ -205,6 +211,7 @@ function normalizeProviderOptions(options: ProviderDiscoveryOptions | undefined,
     refreshIntervalMs: intervalMs(options?.refreshIntervalMs, options?.refreshIntervalHours, pluginOptions.refreshIntervalMs),
     fallbackContextTokens: tokenLimit(options?.fallbackContextTokens) ?? pluginOptions.fallbackContextTokens,
     fallbackOutputTokens: tokenLimit(options?.fallbackOutputTokens) ?? pluginOptions.fallbackOutputTokens,
+    maxResponseBytes: positiveInteger(options?.maxResponseBytes) ?? pluginOptions.maxResponseBytes,
     include: options?.include ?? pluginOptions.providers.include,
     exclude: options?.exclude ?? pluginOptions.providers.exclude,
     overrideExisting: options?.overrideExisting,
@@ -219,6 +226,10 @@ function intervalMs(ms?: number, hours?: number, fallback = DEFAULT_REFRESH_INTE
 
 function tokenLimit(value: number | undefined) {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined
+}
+
+function positiveInteger(value: number | undefined) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined
 }
 
 function shouldHandleProvider(providerID: string, provider: ProviderConfig) {
@@ -240,7 +251,7 @@ function modelsURL(baseURL: string) {
   return url
 }
 
-async function fetchModels(input: { baseURL: string; apiKey?: string }) {
+async function fetchModels(input: { baseURL: string; apiKey?: string; maxResponseBytes: number }) {
   const headers: Record<string, string> = { accept: "application/json" }
   if (input.apiKey) headers.authorization = `Bearer ${input.apiKey}`
 
@@ -251,7 +262,7 @@ async function fetchModels(input: { baseURL: string; apiKey?: string }) {
     })
     if (!response.ok) return undefined
 
-    const body = (await response.json()) as unknown
+    const body = await responseJSON(response, input.maxResponseBytes)
     const responseObject = objectValue(body)
     const values = Array.isArray(body)
       ? body
@@ -269,6 +280,34 @@ async function fetchModels(input: { baseURL: string; apiKey?: string }) {
   } catch {
     return undefined
   }
+}
+
+async function responseJSON(response: Response, maxBytes: number) {
+  const contentLength = numberValue(response.headers.get("content-length"))
+  if (contentLength !== undefined && contentLength > maxBytes) return undefined
+  if (!response.body) return undefined
+
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > maxBytes) {
+      await reader.cancel()
+      return undefined
+    }
+    chunks.push(value)
+  }
+
+  const bytes = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return JSON.parse(new TextDecoder().decode(bytes)) as unknown
 }
 
 function applyModels(provider: ProviderConfig, models: RemoteModel[], overrideExisting: boolean) {

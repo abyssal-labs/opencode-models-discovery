@@ -65,6 +65,7 @@ Default refresh interval is 24 hours. Cached values are still applied on startup
         "refreshIntervalHours": 12,
         "fallbackContextTokens": 128000,
         "fallbackOutputTokens": 16384,
+        "maxResponseBytes": 5242880,
         "overrideExisting": true,
         "providers": {
           "include": [],
@@ -104,6 +105,7 @@ Supported options:
 - `cachePath`: global option for cache file location.
 - `fallbackContextTokens`: optional context limit for newly discovered OpenAI models without context metadata.
 - `fallbackOutputTokens`: optional output limit for newly discovered OpenAI models without output metadata.
+- `maxResponseBytes`: maximum discovery response size in bytes; defaults to 5 MiB.
 - `providers.include`: optional allowlist; empty or omitted means include all matching providers.
 - `providers.exclude`: skip these provider ids.
 - `overrideExisting`: defaults to `true`; when `true`, providers expose only discovered models. When `false`, discovered models are merged into the existing model catalog without replacing existing definitions.

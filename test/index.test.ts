@@ -358,6 +358,30 @@ test("ignores malformed model entries without discarding valid models", async (t
   assert.deepEqual(Object.keys(config.provider.proxy.models ?? {}), ["valid-model"])
 })
 
+test("rejects discovery responses larger than the configured limit", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify({ data: [{ id: "model" }] }), {
+      headers: { "content-length": "100" },
+    })
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  const hooks = await plugin({} as never, {
+    cachePath: join(directory, "cache.json"),
+    maxResponseBytes: 50,
+  })
+  const config = compatibleConfig()
+  config.provider.proxy.models = { existing: { id: "existing" } }
+  await hooks.config?.(config as never)
+
+  assert.deepEqual(config.provider.proxy.models, { existing: { id: "existing" } })
+})
+
 function compatibleConfig() {
   return {
     provider: {
