@@ -66,6 +66,9 @@ Default refresh interval is 24 hours. Cached values are still applied on startup
         "fallbackContextTokens": 128000,
         "fallbackOutputTokens": 16384,
         "maxResponseBytes": 5242880,
+        "headers": {
+          "x-api-key": "{env:DISCOVERY_API_KEY}"
+        },
         "overrideExisting": true,
         "providers": {
           "include": [],
@@ -106,6 +109,7 @@ Supported options:
 - `fallbackContextTokens`: optional context limit for newly discovered OpenAI models without context metadata.
 - `fallbackOutputTokens`: optional output limit for newly discovered OpenAI models without output metadata.
 - `maxResponseBytes`: maximum discovery response size in bytes; defaults to 5 MiB.
+- `headers`: additional headers for `/models` discovery; values support `{env:NAME}` expansion.
 - `providers.include`: optional allowlist; empty or omitted means include all matching providers.
 - `providers.exclude`: skip these provider ids.
 - `overrideExisting`: defaults to `true`; when `true`, providers expose only discovered models. When `false`, discovered models are merged into the existing model catalog without replacing existing definitions.

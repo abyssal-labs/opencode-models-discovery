@@ -382,6 +382,38 @@ test("rejects discovery responses larger than the configured limit", async (t) =
   assert.deepEqual(config.provider.proxy.models, { existing: { id: "existing" } })
 })
 
+test("sends configured discovery headers", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+
+  const originalFetch = globalThis.fetch
+  const originalKey = process.env.DISCOVERY_TEST_KEY
+  process.env.DISCOVERY_TEST_KEY = "secret"
+  let requestHeaders = new Headers()
+  globalThis.fetch = async (_input, init) => {
+    requestHeaders = new Headers(init?.headers)
+    return Response.json({ data: [] })
+  }
+  t.after(() => {
+    globalThis.fetch = originalFetch
+    if (originalKey === undefined) delete process.env.DISCOVERY_TEST_KEY
+    else process.env.DISCOVERY_TEST_KEY = originalKey
+  })
+
+  const hooks = await plugin({} as never, {
+    cachePath: join(directory, "cache.json"),
+    headers: {
+      "x-api-key": "{env:DISCOVERY_TEST_KEY}",
+      authorization: "Basic custom",
+    },
+  })
+  await hooks.config?.(compatibleConfig() as never)
+
+  assert.equal(requestHeaders.get("x-api-key"), "secret")
+  assert.equal(requestHeaders.get("authorization"), "Basic custom")
+  assert.equal(requestHeaders.get("accept"), "application/json")
+})
+
 function compatibleConfig() {
   return {
     provider: {

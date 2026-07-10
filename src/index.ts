@@ -45,6 +45,7 @@ type ProviderDiscoveryOptions = {
   fallbackContextTokens?: number
   fallbackOutputTokens?: number
   maxResponseBytes?: number
+  headers?: Record<string, string>
   include?: string[]
   exclude?: string[]
   overrideExisting?: boolean
@@ -57,6 +58,7 @@ type PluginOptions = {
   fallbackContextTokens?: number
   fallbackOutputTokens?: number
   maxResponseBytes?: number
+  headers?: Record<string, string>
   cachePath?: string
   providers?: {
     include?: string[]
@@ -126,6 +128,7 @@ const plugin: Plugin = async (_input, options = {}) => {
         const refreshed = await refreshModels(cache, cacheKey, {
           baseURL,
           apiKey: expandEnv(provider.options?.apiKey),
+          headers: expandEnvRecord(providerOptions.headers),
           maxResponseBytes: providerOptions.maxResponseBytes,
           refreshIntervalMs: providerOptions.refreshIntervalMs,
         })
@@ -155,6 +158,7 @@ const plugin: Plugin = async (_input, options = {}) => {
         const refreshed = await refreshModels(cache, cacheKey, {
           baseURL,
           apiKey: expandEnv(configProvider?.options?.apiKey),
+          headers: expandEnvRecord(providerOptions.headers),
           maxResponseBytes: providerOptions.maxResponseBytes,
           refreshIntervalMs: providerOptions.refreshIntervalMs,
         })
@@ -180,6 +184,7 @@ function normalizePluginOptions(options: PluginOptions) {
     fallbackContextTokens: tokenLimit(options.fallbackContextTokens),
     fallbackOutputTokens: tokenLimit(options.fallbackOutputTokens),
     maxResponseBytes: positiveInteger(options.maxResponseBytes) ?? DEFAULT_MAX_RESPONSE_BYTES,
+    headers: options.headers,
     cachePath: options.cachePath ?? DEFAULT_CACHE_PATH,
     providers: options.providers ?? {},
     overrideExisting: options.overrideExisting ?? true,
@@ -192,6 +197,7 @@ function normalizeProviderOptions(options: ProviderDiscoveryOptions | undefined,
     fallbackContextTokens: tokenLimit(options?.fallbackContextTokens) ?? pluginOptions.fallbackContextTokens,
     fallbackOutputTokens: tokenLimit(options?.fallbackOutputTokens) ?? pluginOptions.fallbackOutputTokens,
     maxResponseBytes: positiveInteger(options?.maxResponseBytes) ?? pluginOptions.maxResponseBytes,
+    headers: options?.headers ?? pluginOptions.headers,
     include: options?.include ?? pluginOptions.providers.include,
     exclude: options?.exclude ?? pluginOptions.providers.exclude,
     overrideExisting: options?.overrideExisting,
@@ -234,7 +240,13 @@ function modelsURL(baseURL: string) {
 async function refreshModels(
   cache: Cache,
   cacheKey: string,
-  input: { baseURL: string; apiKey?: string; maxResponseBytes: number; refreshIntervalMs: number },
+  input: {
+    baseURL: string
+    apiKey?: string
+    headers?: Record<string, string>
+    maxResponseBytes: number
+    refreshIntervalMs: number
+  },
 ) {
   const cached = cache.providers[cacheKey]
   const now = Date.now()
@@ -249,9 +261,15 @@ async function refreshModels(
   return { models: discovered, changed: true }
 }
 
-async function fetchModels(input: { baseURL: string; apiKey?: string; maxResponseBytes: number }) {
-  const headers: Record<string, string> = { accept: "application/json" }
-  if (input.apiKey) headers.authorization = `Bearer ${input.apiKey}`
+async function fetchModels(input: {
+  baseURL: string
+  apiKey?: string
+  headers?: Record<string, string>
+  maxResponseBytes: number
+}) {
+  const headers = new Headers(input.headers)
+  if (!headers.has("accept")) headers.set("accept", "application/json")
+  if (input.apiKey && !headers.has("authorization")) headers.set("authorization", `Bearer ${input.apiKey}`)
 
   try {
     const response = await fetch(modelsURL(input.baseURL), {
@@ -694,6 +712,16 @@ function expandEnv(value: string | undefined) {
   const match = value.match(/^\{env:([A-Za-z_][A-Za-z0-9_]*)\}$/)
   if (match) return process.env[match[1]]
   return value
+}
+
+function expandEnvRecord(values: Record<string, string> | undefined) {
+  if (!values) return undefined
+  return Object.fromEntries(
+    Object.entries(values).flatMap(([key, value]) => {
+      const expanded = expandEnv(value)
+      return expanded === undefined ? [] : [[key, expanded]]
+    }),
+  )
 }
 
 async function readCache(path: string): Promise<Cache> {
