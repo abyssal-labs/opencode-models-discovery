@@ -106,20 +106,6 @@ const DEFAULT_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000
 const DEFAULT_MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 const DEFAULT_MAX_PAGES = 10
 const DEFAULT_TIMEOUT_MS = 10_000
-const OPENAI_SDKS = new Set([
-  "@ai-sdk/cerebras",
-  "@ai-sdk/deepinfra",
-  "@ai-sdk/groq",
-  "@ai-sdk/mistral",
-  "@ai-sdk/openai",
-  "@ai-sdk/openai-compatible",
-  "@ai-sdk/togetherai",
-  "@ai-sdk/xai",
-  "@aihubmix/ai-sdk-provider",
-  "@openrouter/ai-sdk-provider",
-  "venice-ai-sdk-provider",
-])
-const ANTHROPIC_SDKS = new Set(["@ai-sdk/anthropic"])
 const HOOKED_PROVIDERS = new Set(["openai", "anthropic"])
 
 function createPlugin(
@@ -398,8 +384,10 @@ function positiveInteger(value: number | undefined) {
 }
 
 function providerApiFormat(providerID: string, provider: ProviderConfig): ApiFormat | undefined {
-  if (providerID === "openai" || (provider.npm && OPENAI_SDKS.has(provider.npm))) return "openai"
-  if (providerID === "anthropic" || (provider.npm && ANTHROPIC_SDKS.has(provider.npm))) return "anthropic"
+  const sdk = provider.npm?.toLowerCase()
+  if (providerID === "anthropic" || sdk?.includes("anthropic")) return "anthropic"
+  if (providerID === "openai" || sdk?.includes("openai")) return "openai"
+  if (provider.options?.baseURL) return "openai"
   return undefined
 }
 
