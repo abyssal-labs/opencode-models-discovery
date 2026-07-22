@@ -423,11 +423,18 @@ test("discovers Cloudflare Workers AI models with account metadata", async (t) =
 
   const originalFetch = globalThis.fetch
   let requestedURL = ""
+  let fetchCount = 0
   let authorization = ""
   globalThis.fetch = async (input, init) => {
     requestedURL = input.toString()
     authorization = new Headers(init?.headers).get("authorization") ?? ""
-    return Response.json({ data: [{ id: "@cf/example/model", context_length: 32_000 }] })
+    fetchCount += 1
+    return fetchCount === 1
+      ? Response.json({
+          result: [{ id: "@cf/example/model", context_length: 32_000 }],
+          result_info: { page: 1, total_pages: 2 },
+        })
+      : Response.json({ result: [{ id: "@cf/example/second-model" }], result_info: { page: 2, total_pages: 2 } })
   }
   t.after(() => {
     globalThis.fetch = originalFetch
@@ -450,12 +457,10 @@ test("discovers Cloudflare Workers AI models with account metadata", async (t) =
     { auth: { type: "api", key: "cloudflare-secret", metadata: { accountId: "account/id" } } },
   )
 
-  assert.equal(
-    requestedURL,
-    "https://api.cloudflare.com/client/v4/accounts/account%2Fid/ai/models/search?format=openrouter&per_page=1000",
-  )
+  assert.equal(requestedURL, "https://api.cloudflare.com/client/v4/accounts/account%2Fid/ai/models/search?page=2")
   assert.equal(authorization, "Bearer cloudflare-secret")
   assert.equal(models?.["@cf/example/model"].limit.context, 32_000)
+  assert.ok(models?.["@cf/example/second-model"])
 })
 
 test("discovers active text models from Amazon Bedrock", async (t) => {

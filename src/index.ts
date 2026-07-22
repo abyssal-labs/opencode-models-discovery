@@ -257,7 +257,7 @@ export const CloudflareWorkersModelsDiscoveryPlugin = createPlugin(
   (_provider, _configured, authMetadata) => {
     const accountID = authMetadata?.accountId ?? process.env.CLOUDFLARE_ACCOUNT_ID
     if (!accountID) return undefined
-    return `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountID)}/ai/models/search?format=openrouter&per_page=1000`
+    return `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountID)}/ai/models/search`
   },
 )
 
@@ -579,7 +579,9 @@ async function fetchModels(input: {
             ? responseObject.models
             : Array.isArray(responseObject?.modelSummaries)
               ? responseObject.modelSummaries
-              : undefined
+              : Array.isArray(responseObject?.result)
+                ? responseObject.result
+                : undefined
       if (!values) return { ok: false as const, reason: "Invalid or oversized JSON response" }
 
       const pageModels = values
@@ -609,6 +611,15 @@ async function fetchModels(input: {
 
 function nextPageURL(response: Record<string, unknown> | undefined, current: URL, apiFormat: DiscoveryFormat) {
   if (!response) return undefined
+  if (apiFormat === "cloudflare") {
+    const info = objectValue(response.result_info)
+    const page = numberValue(info?.page)
+    const totalPages = numberValue(info?.total_pages)
+    if (page === undefined || totalPages === undefined || page >= totalPages) return undefined
+    const url = new URL(current)
+    url.searchParams.set("page", String(page + 1))
+    return url
+  }
   if (apiFormat === "cohere") {
     const pageToken = stringValue(response.next_page_token)
     if (!pageToken) return undefined
