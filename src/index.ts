@@ -167,7 +167,8 @@ const plugin: Plugin = async (input, options = {}) => {
         if (!matchesProviderFilter(provider.id, providerOptions)) return provider.models
 
         const cache = await readCache(pluginOptions.cachePath)
-        const apiKey = expandEnv(configProvider?.options?.apiKey)
+        const apiKey =
+          expandEnv(configProvider?.options?.apiKey) ?? (ctx.auth?.type === "api" ? ctx.auth.key : undefined)
         const headers = expandEnvRecord(providerOptions.headers)
         const cacheKey = modelCacheKey(provider.id, { baseURL, apiKey, headers })
         const refreshed = await refreshModels(cache, cacheKey, {

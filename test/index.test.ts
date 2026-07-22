@@ -107,6 +107,71 @@ test("uses the discovered ID for OpenAI API requests", async (t) => {
   assert.equal(models?.["discovered-model-fast"].options.serviceTier, "priority")
 })
 
+test("uses OpenCode connect credentials for OpenAI discovery", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+
+  const originalFetch = globalThis.fetch
+  let authorization = ""
+  globalThis.fetch = async (_input, init) => {
+    authorization = new Headers(init?.headers).get("authorization") ?? ""
+    return Response.json({ data: [{ id: "connected-model" }] })
+  }
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  const hooks = await plugin({} as never, { cachePath: join(directory, "cache.json") })
+  await hooks.config?.({ provider: { openai: { options: { baseURL: "https://proxy.example/v1" } } } } as never)
+  const models = await hooks.provider?.models?.(
+    {
+      id: "openai",
+      name: "OpenAI",
+      source: "config",
+      env: [],
+      options: {},
+      models: { "template-model": providerModel("template-model") },
+    },
+    { auth: { type: "api", key: "connected-secret" } },
+  )
+
+  assert.equal(authorization, "Bearer connected-secret")
+  assert.ok(models?.["connected-model"])
+})
+
+test("prefers a configured OpenAI key over connect credentials", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+
+  const originalFetch = globalThis.fetch
+  let authorization = ""
+  globalThis.fetch = async (_input, init) => {
+    authorization = new Headers(init?.headers).get("authorization") ?? ""
+    return Response.json({ data: [] })
+  }
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  const hooks = await plugin({} as never, { cachePath: join(directory, "cache.json") })
+  await hooks.config?.({
+    provider: { openai: { options: { baseURL: "https://proxy.example/v1", apiKey: "configured-secret" } } },
+  } as never)
+  await hooks.provider?.models?.(
+    {
+      id: "openai",
+      name: "OpenAI",
+      source: "config",
+      env: [],
+      options: {},
+      models: { "template-model": providerModel("template-model") },
+    },
+    { auth: { type: "api", key: "connected-secret" } },
+  )
+
+  assert.equal(authorization, "Bearer configured-secret")
+})
+
 test("does not copy model-specific metadata into newly discovered OpenAI models", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
   t.after(() => rm(directory, { recursive: true, force: true }))

@@ -73,6 +73,8 @@ Paginated responses can use `next_page`, `next`, or `has_more` with `last_id`. C
 
 Default refresh interval is 24 hours. Cached values are still applied on startup when the cache is fresh; the endpoint is only rechecked after the interval.
 
+For the built-in `openai` provider, discovery uses API credentials configured through OpenCode's `/connect` flow when `options.apiKey` is not set. Credentials are supplied by OpenCode's plugin runtime and are never read from its on-disk auth store. An explicit `options.apiKey` takes precedence.
+
 ```json
 {
   "plugin": [
