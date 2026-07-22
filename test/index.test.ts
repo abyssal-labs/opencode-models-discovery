@@ -481,17 +481,26 @@ test("discovers active text models from Amazon Bedrock", async (t) => {
           modelId: "provider.text-model",
           modelName: "Text Model",
           modelLifecycle: { status: "ACTIVE" },
+          inferenceTypesSupported: ["ON_DEMAND"],
           inputModalities: ["TEXT", "IMAGE"],
           outputModalities: ["TEXT"],
         },
         {
           modelId: "provider.image-model",
           modelLifecycle: { status: "ACTIVE" },
+          inferenceTypesSupported: ["ON_DEMAND"],
           outputModalities: ["IMAGE"],
         },
         {
           modelId: "provider.legacy-model",
           modelLifecycle: { status: "LEGACY" },
+          inferenceTypesSupported: ["ON_DEMAND"],
+          outputModalities: ["TEXT"],
+        },
+        {
+          modelId: "provider.provisioned-model",
+          modelLifecycle: { status: "ACTIVE" },
+          inferenceTypesSupported: ["PROVISIONED"],
           outputModalities: ["TEXT"],
         },
       ],
@@ -527,6 +536,7 @@ test("discovers active text models from Amazon Bedrock", async (t) => {
   assert.equal(models?.["provider.text-model"].capabilities.input.image, true)
   assert.equal(models?.["provider.image-model"], undefined)
   assert.equal(models?.["provider.legacy-model"], undefined)
+  assert.equal(models?.["provider.provisioned-model"], undefined)
 })
 
 test("supports an explicit API format for custom provider SDKs", async (t) => {

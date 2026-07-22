@@ -245,7 +245,8 @@ export const AmazonBedrockModelsDiscoveryPlugin = createPlugin(
   (_provider, configured) => {
     const region = stringValue(configured?.options?.region, process.env.AWS_REGION) ?? "us-east-1"
     if (!/^[a-z]{2}(?:-gov)?-[a-z]+-\d+$/.test(region)) return undefined
-    return `https://bedrock.${region}.amazonaws.com`
+    const domain = region.startsWith("cn-") ? "amazonaws.com.cn" : "amazonaws.com"
+    return `https://bedrock.${region}.${domain}`
   },
 )
 
@@ -649,6 +650,8 @@ function nextPageURL(response: Record<string, unknown> | undefined, current: URL
 function normalizeRemoteModel(model: Record<string, unknown> | undefined, apiFormat: DiscoveryFormat) {
   if (!model) return undefined
   if (apiFormat === "bedrock") {
+    const inferenceTypes = stringArray(model.inferenceTypesSupported)
+    if (inferenceTypes && !inferenceTypes.includes("ON_DEMAND")) return undefined
     const outputModalities = stringArray(model.outputModalities)
     if (outputModalities && !outputModalities.includes("TEXT")) return undefined
     const lifecycle = objectValue(model.modelLifecycle)
