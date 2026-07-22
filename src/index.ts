@@ -40,7 +40,10 @@ type OpenCodeConfig = {
   provider?: Record<string, ProviderConfig>
 }
 
+export type ApiFormat = "openai" | "anthropic"
+
 export type ProviderDiscoveryOptions = {
+  apiFormat?: ApiFormat
   refreshIntervalMs?: number
   refreshIntervalHours?: number
   fallbackContextTokens?: number
@@ -104,98 +107,115 @@ const DEFAULT_MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 const DEFAULT_MAX_PAGES = 10
 const DEFAULT_TIMEOUT_MS = 10_000
 const OPENAI_SDKS = new Set(["@ai-sdk/openai", "@ai-sdk/openai-compatible"])
+const ANTHROPIC_SDKS = new Set(["@ai-sdk/anthropic"])
+const HOOKED_PROVIDERS = new Set(["openai", "anthropic"])
 
-const plugin: Plugin = async (input, options = {}) => {
-  validatePluginOptions(options)
-  const pluginOptions = normalizePluginOptions(options as PluginOptions)
-  const capturedProviders = new Map<string, ProviderConfig>()
+function createPlugin(
+  hookedProviderID: string,
+  hookedApiFormat: ApiFormat,
+  discoverConfiguredProviders: boolean,
+): Plugin {
+  return async (input, options = {}) => {
+    validatePluginOptions(options)
+    const pluginOptions = normalizePluginOptions(options as PluginOptions)
+    const capturedProviders = new Map<string, ProviderConfig>()
 
-  return {
-    config: async (cfg: OpenCodeConfig) => {
-      if (pluginOptions.enabled === false) return
-      if (!cfg.provider) return
-
-      const cache = await readCache(pluginOptions.cachePath)
-      let cacheChanged = false
-
-      for (const [providerID, provider] of Object.entries(cfg.provider)) {
-        if (providerID === "openai") {
-          capturedProviders.set(providerID, provider)
-          continue
-        }
-        const providerOptions = normalizeProviderOptions(provider.options?.modelsDiscovery, pluginOptions)
-        if (!shouldHandleProvider(providerID, provider)) continue
-        if (!matchesProviderFilter(providerID, providerOptions)) continue
-
-        const baseURL = provider.options?.baseURL
-        // Native OpenAI OAuth/API providers have no custom baseURL; discovery is only for wrappers/proxies.
-        if (!baseURL) continue
-
-        const apiKey = expandEnv(provider.options?.apiKey)
-        const headers = expandEnvRecord(providerOptions.headers)
-        const cacheKey = modelCacheKey(providerID, { baseURL, apiKey, headers })
-        const refreshed = await refreshModels(cache, cacheKey, {
-          providerID,
-          baseURL,
-          apiKey,
-          headers,
-          maxResponseBytes: providerOptions.maxResponseBytes,
-          maxPages: providerOptions.maxPages,
-          timeoutMs: providerOptions.timeoutMs,
-          refreshIntervalMs: providerOptions.refreshIntervalMs,
-          log: (message, extra) => writeLog(input, message, extra),
-        })
-        cacheChanged ||= refreshed.changed
-
-        if (refreshed.models) {
-          const overrideExisting = providerOptions.overrideExisting ?? pluginOptions.overrideExisting
-          if (overrideExisting) provider.models = {}
-          applyModels(provider, refreshed.models, overrideExisting)
-        }
-      }
-
-      if (cacheChanged) await writeCache(pluginOptions.cachePath, cache)
-    },
-    provider: {
-      id: "openai",
-      async models(provider, ctx) {
-        if (ctx.auth?.type === "oauth") return provider.models
-        const configProvider = capturedProviders.get(provider.id)
-        const providerOptions = normalizeProviderOptions(configProvider?.options?.modelsDiscovery, pluginOptions)
-        const baseURL = configProvider?.options?.baseURL
-        if (!baseURL) return provider.models
-        if (!matchesProviderFilter(provider.id, providerOptions)) return provider.models
+    return {
+      config: async (cfg: OpenCodeConfig) => {
+        if (pluginOptions.enabled === false) return
+        if (!cfg.provider) return
 
         const cache = await readCache(pluginOptions.cachePath)
-        const apiKey =
-          expandEnv(configProvider?.options?.apiKey) ?? (ctx.auth?.type === "api" ? ctx.auth.key : undefined)
-        const headers = expandEnvRecord(providerOptions.headers)
-        const cacheKey = modelCacheKey(provider.id, { baseURL, apiKey, headers })
-        const refreshed = await refreshModels(cache, cacheKey, {
-          providerID: provider.id,
-          baseURL,
-          apiKey,
-          headers,
-          maxResponseBytes: providerOptions.maxResponseBytes,
-          maxPages: providerOptions.maxPages,
-          timeoutMs: providerOptions.timeoutMs,
-          refreshIntervalMs: providerOptions.refreshIntervalMs,
-          log: (message, extra) => writeLog(input, message, extra),
-        })
-        if (refreshed.changed) await writeCache(pluginOptions.cachePath, cache)
+        let cacheChanged = false
 
-        return refreshed.models
-          ? applyProviderModels(
-              provider,
-              refreshed.models,
-              providerOptions.overrideExisting ?? pluginOptions.overrideExisting,
-              providerOptions,
-            )
-          : provider.models
+        for (const [providerID, provider] of Object.entries(cfg.provider)) {
+          if (providerID === hookedProviderID) {
+            capturedProviders.set(providerID, provider)
+            continue
+          }
+          if (!discoverConfiguredProviders || HOOKED_PROVIDERS.has(providerID)) continue
+          const providerOptions = normalizeProviderOptions(provider.options?.modelsDiscovery, pluginOptions)
+          const apiFormat = providerOptions.apiFormat ?? providerApiFormat(providerID, provider)
+          if (!apiFormat) continue
+          if (!matchesProviderFilter(providerID, providerOptions)) continue
+
+          const baseURL = provider.options?.baseURL
+          // Native providers without a custom baseURL keep OpenCode's catalog; discovery is for wrappers/proxies.
+          if (!baseURL) continue
+
+          const apiKey = expandEnv(provider.options?.apiKey)
+          const headers = expandEnvRecord(providerOptions.headers)
+          const cacheKey = modelCacheKey(providerID, { baseURL, apiKey, headers, apiFormat })
+          const refreshed = await refreshModels(cache, cacheKey, {
+            providerID,
+            baseURL,
+            apiKey,
+            apiFormat,
+            headers,
+            maxResponseBytes: providerOptions.maxResponseBytes,
+            maxPages: providerOptions.maxPages,
+            timeoutMs: providerOptions.timeoutMs,
+            refreshIntervalMs: providerOptions.refreshIntervalMs,
+            log: (message, extra) => writeLog(input, message, extra),
+          })
+          cacheChanged ||= refreshed.changed
+
+          if (refreshed.models) {
+            const overrideExisting = providerOptions.overrideExisting ?? pluginOptions.overrideExisting
+            if (overrideExisting) provider.models = {}
+            applyModels(provider, refreshed.models, overrideExisting)
+          }
+        }
+
+        if (cacheChanged) await writeCache(pluginOptions.cachePath, cache)
       },
-    },
+      provider: {
+        id: hookedProviderID,
+        async models(provider, ctx) {
+          if (ctx.auth?.type === "oauth") return provider.models
+          const configProvider = capturedProviders.get(provider.id)
+          const providerOptions = normalizeProviderOptions(configProvider?.options?.modelsDiscovery, pluginOptions)
+          const baseURL = configProvider?.options?.baseURL
+          if (!baseURL) return provider.models
+          if (!matchesProviderFilter(provider.id, providerOptions)) return provider.models
+
+          const cache = await readCache(pluginOptions.cachePath)
+          const apiKey =
+            expandEnv(configProvider?.options?.apiKey) ?? (ctx.auth?.type === "api" ? ctx.auth.key : undefined)
+          const headers = expandEnvRecord(providerOptions.headers)
+          const apiFormat = providerOptions.apiFormat ?? hookedApiFormat
+          const cacheKey = modelCacheKey(provider.id, { baseURL, apiKey, headers, apiFormat })
+          const refreshed = await refreshModels(cache, cacheKey, {
+            providerID: provider.id,
+            baseURL,
+            apiKey,
+            apiFormat,
+            headers,
+            maxResponseBytes: providerOptions.maxResponseBytes,
+            maxPages: providerOptions.maxPages,
+            timeoutMs: providerOptions.timeoutMs,
+            refreshIntervalMs: providerOptions.refreshIntervalMs,
+            log: (message, extra) => writeLog(input, message, extra),
+          })
+          if (refreshed.changed) await writeCache(pluginOptions.cachePath, cache)
+
+          return refreshed.models
+            ? applyProviderModels(
+                provider,
+                refreshed.models,
+                providerOptions.overrideExisting ?? pluginOptions.overrideExisting,
+                providerOptions,
+              )
+            : provider.models
+        },
+      },
+    }
   }
 }
+
+const plugin = createPlugin("openai", "openai", true)
+
+export const AnthropicModelsDiscoveryPlugin = createPlugin("anthropic", "anthropic", false)
 
 function normalizePluginOptions(options: PluginOptions) {
   return {
@@ -222,6 +242,7 @@ function normalizeProviderOptions(value: unknown, pluginOptions: ReturnType<type
   validateProviderOptions(value)
   const options = value as ProviderDiscoveryOptions | undefined
   return {
+    apiFormat: options?.apiFormat,
     refreshIntervalMs: intervalMs(
       options?.refreshIntervalMs,
       options?.refreshIntervalHours,
@@ -278,6 +299,7 @@ function validateProviderOptions(value: unknown): asserts value is ProviderDisco
   rejectUnknownOptions(
     options,
     new Set([
+      "apiFormat",
       "refreshIntervalMs",
       "refreshIntervalHours",
       "fallbackContextTokens",
@@ -293,6 +315,9 @@ function validateProviderOptions(value: unknown): asserts value is ProviderDisco
     "provider modelsDiscovery options",
   )
   validateCommonOptions(options, "provider modelsDiscovery options")
+  if (options.apiFormat !== undefined && options.apiFormat !== "openai" && options.apiFormat !== "anthropic") {
+    invalidOption("provider modelsDiscovery options", "apiFormat")
+  }
   validateStringArray(options.include, "provider modelsDiscovery options", "include")
   validateStringArray(options.exclude, "provider modelsDiscovery options", "exclude")
   if (options.overrideExisting !== undefined && typeof options.overrideExisting !== "boolean") {
@@ -360,10 +385,10 @@ function positiveInteger(value: number | undefined) {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined
 }
 
-function shouldHandleProvider(providerID: string, provider: ProviderConfig) {
-  if (providerID === "openai") return true
-  if (provider.npm && OPENAI_SDKS.has(provider.npm)) return true
-  return false
+function providerApiFormat(providerID: string, provider: ProviderConfig): ApiFormat | undefined {
+  if (providerID === "openai" || (provider.npm && OPENAI_SDKS.has(provider.npm))) return "openai"
+  if (providerID === "anthropic" || (provider.npm && ANTHROPIC_SDKS.has(provider.npm))) return "anthropic"
+  return undefined
 }
 
 function matchesProviderFilter(providerID: string, options: ReturnType<typeof normalizeProviderOptions>) {
@@ -384,11 +409,11 @@ function modelsURL(baseURL: string) {
 
 function modelCacheKey(
   providerID: string,
-  input: { baseURL: string; apiKey?: string; headers?: Record<string, string> },
+  input: { baseURL: string; apiKey?: string; headers?: Record<string, string>; apiFormat: ApiFormat },
 ) {
   const headers = Object.entries(input.headers ?? {}).sort(([left], [right]) => left.localeCompare(right))
   const digest = createHash("sha256")
-    .update(JSON.stringify({ baseURL: input.baseURL, apiKey: input.apiKey, headers }))
+    .update(JSON.stringify({ baseURL: input.baseURL, apiKey: input.apiKey, headers, apiFormat: input.apiFormat }))
     .digest("hex")
     .slice(0, 24)
   return `${providerID}:${digest}`
@@ -401,6 +426,7 @@ async function refreshModels(
     providerID: string
     baseURL: string
     apiKey?: string
+    apiFormat: ApiFormat
     headers?: Record<string, string>
     maxResponseBytes: number
     maxPages: number
@@ -447,6 +473,7 @@ function redactedURL(value: string) {
 async function fetchModels(input: {
   baseURL: string
   apiKey?: string
+  apiFormat: ApiFormat
   headers?: Record<string, string>
   maxResponseBytes: number
   maxPages: number
@@ -454,7 +481,12 @@ async function fetchModels(input: {
 }) {
   const headers = new Headers(input.headers)
   if (!headers.has("accept")) headers.set("accept", "application/json")
-  if (input.apiKey && !headers.has("authorization")) headers.set("authorization", `Bearer ${input.apiKey}`)
+  if (input.apiFormat === "anthropic") {
+    if (input.apiKey && !headers.has("x-api-key")) headers.set("x-api-key", input.apiKey)
+    if (!headers.has("anthropic-version")) headers.set("anthropic-version", "2023-06-01")
+  } else if (input.apiKey && !headers.has("authorization")) {
+    headers.set("authorization", `Bearer ${input.apiKey}`)
+  }
 
   try {
     const initialURL = modelsURL(input.baseURL)

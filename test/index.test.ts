@@ -4,7 +4,7 @@ import { createServer } from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
-import plugin from "../src/index.ts"
+import plugin, { AnthropicModelsDiscoveryPlugin } from "../src/index.ts"
 
 test("discovers models for an OpenAI-compatible provider", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
@@ -170,6 +170,111 @@ test("prefers a configured OpenAI key over connect credentials", async (t) => {
   )
 
   assert.equal(authorization, "Bearer configured-secret")
+})
+
+test("uses OpenCode connect credentials for Anthropic discovery", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+
+  const originalFetch = globalThis.fetch
+  let requestURL = ""
+  let requestHeaders = new Headers()
+  globalThis.fetch = async (input, init) => {
+    requestURL = input.toString()
+    requestHeaders = new Headers(init?.headers)
+    return Response.json({ data: [{ id: "claude-example", display_name: "Claude Example" }] })
+  }
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  const hooks = await AnthropicModelsDiscoveryPlugin({} as never, { cachePath: join(directory, "cache.json") })
+  await hooks.config?.({ provider: { anthropic: { options: { baseURL: "https://api.example/v1" } } } } as never)
+  const template = providerModel("template-model")
+  template.providerID = "anthropic"
+  template.api.npm = "@ai-sdk/anthropic"
+  const models = await hooks.provider?.models?.(
+    {
+      id: "anthropic",
+      name: "Anthropic",
+      source: "config",
+      env: [],
+      options: {},
+      models: { "template-model": template },
+    },
+    { auth: { type: "api", key: "anthropic-secret" } },
+  )
+
+  assert.equal(requestURL, "https://api.example/v1/models")
+  assert.equal(requestHeaders.get("x-api-key"), "anthropic-secret")
+  assert.equal(requestHeaders.get("anthropic-version"), "2023-06-01")
+  assert.equal(requestHeaders.get("authorization"), null)
+  assert.equal(models?.["claude-example"].name, "Claude Example")
+})
+
+test("auto-detects Anthropic-compatible configured providers", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+
+  const originalFetch = globalThis.fetch
+  let requestHeaders = new Headers()
+  globalThis.fetch = async (_input, init) => {
+    requestHeaders = new Headers(init?.headers)
+    return Response.json({ data: [{ id: "claude-proxy" }] })
+  }
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  const hooks = await plugin({} as never, { cachePath: join(directory, "cache.json") })
+  const config = {
+    provider: {
+      proxy: {
+        npm: "@ai-sdk/anthropic",
+        options: { baseURL: "https://anthropic-proxy.example/v1", apiKey: "proxy-secret" },
+        models: undefined as Record<string, unknown> | undefined,
+      },
+    },
+  }
+  await hooks.config?.(config as never)
+
+  assert.equal(requestHeaders.get("x-api-key"), "proxy-secret")
+  assert.equal(requestHeaders.get("anthropic-version"), "2023-06-01")
+  assert.ok(config.provider.proxy.models?.["claude-proxy"])
+})
+
+test("supports an explicit API format for custom provider SDKs", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+
+  const originalFetch = globalThis.fetch
+  let requestHeaders = new Headers()
+  globalThis.fetch = async (_input, init) => {
+    requestHeaders = new Headers(init?.headers)
+    return Response.json({ data: [{ id: "explicit-format-model" }] })
+  }
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  const hooks = await plugin({} as never, { cachePath: join(directory, "cache.json") })
+  const config = {
+    provider: {
+      proxy: {
+        npm: "custom-anthropic-sdk",
+        options: {
+          baseURL: "https://anthropic-proxy.example/v1",
+          apiKey: "proxy-secret",
+          modelsDiscovery: { apiFormat: "anthropic" as const },
+        },
+        models: undefined as Record<string, unknown> | undefined,
+      },
+    },
+  }
+  await hooks.config?.(config as never)
+
+  assert.equal(requestHeaders.get("x-api-key"), "proxy-secret")
+  assert.ok(config.provider.proxy.models?.["explicit-format-model"])
 })
 
 test("does not copy model-specific metadata into newly discovered OpenAI models", async (t) => {
@@ -541,6 +646,18 @@ test("honors XDG_CACHE_HOME for the default cache", async (t) => {
 test("rejects invalid and unknown plugin options", async () => {
   await assert.rejects(plugin({} as never, { maxResponseBytes: 0 }), /maxResponseBytes has an invalid value/)
   await assert.rejects(plugin({} as never, { refreshIntervlMs: 1 }), /refreshIntervlMs is not supported/)
+
+  const hooks = await plugin({} as never)
+  await assert.rejects(async () => {
+    await hooks.config?.({
+      provider: {
+        proxy: {
+          npm: "@ai-sdk/openai-compatible",
+          options: { baseURL: "https://proxy.example/v1", modelsDiscovery: { apiFormat: "unknown" } },
+        },
+      },
+    } as never)
+  }, /apiFormat has an invalid value/)
 })
 
 test("logs discovery failures without exposing credentials", async (t) => {

@@ -1,14 +1,18 @@
 # opencode-models-discovery
 
-Local opencode plugin that refreshes model metadata from OpenAI-compatible `/models` endpoints and applies it to opencode provider config.
+OpenCode plugin that discovers model metadata from OpenAI- and Anthropic-compatible `/models` endpoints and applies it to provider config.
 
-This is for OpenAI-compatible wrappers/proxies that set `provider.<name>.options.baseURL`. Native OpenAI OAuth is skipped because it does not use a custom `baseURL` and opencode already handles Codex OAuth model limits internally.
+This is for wrappers and proxies that set `provider.<name>.options.baseURL`. Native OAuth is skipped when it does not use a custom `baseURL` and OpenCode already manages that provider's model catalog.
 
-It targets custom-baseURL providers using the OpenAI SDK paths:
+It automatically detects custom-baseURL providers using these SDK paths:
 
 - Provider id `openai`
 - `npm: "@ai-sdk/openai"`
 - `npm: "@ai-sdk/openai-compatible"`
+- Provider id `anthropic`
+- `npm: "@ai-sdk/anthropic"`
+
+Other provider IDs can opt into either wire format with `modelsDiscovery.apiFormat` set to `"openai"` or `"anthropic"`.
 
 All matching providers are included by default. Use `providers.include` as an optional allowlist; when it is empty or omitted, all matching providers are included. Use `providers.exclude` to skip a provider.
 
@@ -30,7 +34,7 @@ Modality names are normalized to lowercase, and `vision` is normalized to `image
 
 Existing models are overridden by default so the wrapper/proxy `/models` metadata wins over models.dev metadata. With the default `overrideExisting: true`, providers expose only models returned by the `/models` endpoint. This is especially useful for custom `openai` base URLs because opencode otherwise starts from its built-in OpenAI model catalog.
 
-Unknown limits are left unchanged for existing models. Newly discovered OpenAI models use the provider template's limits unless `fallbackContextTokens` or `fallbackOutputTokens` is configured.
+Unknown limits are left unchanged for existing models. Newly discovered built-in provider models use the provider template's limits unless `fallbackContextTokens` or `fallbackOutputTokens` is configured.
 
 ## Modes and service tiers
 
@@ -73,7 +77,9 @@ Paginated responses can use `next_page`, `next`, or `has_more` with `last_id`. C
 
 Default refresh interval is 24 hours. Cached values are still applied on startup when the cache is fresh; the endpoint is only rechecked after the interval.
 
-For the built-in `openai` provider, discovery uses API credentials configured through OpenCode's `/connect` flow when `options.apiKey` is not set. Credentials are supplied by OpenCode's plugin runtime and are never read from its on-disk auth store. An explicit `options.apiKey` takes precedence.
+For the built-in `openai` and `anthropic` providers, discovery uses API credentials configured through OpenCode's `/connect` flow when `options.apiKey` is not set. Credentials are supplied by OpenCode's supported plugin runtime and are never read from its on-disk auth store. An explicit `options.apiKey` takes precedence.
+
+OpenAI-format discovery sends `Authorization: Bearer <key>`. Anthropic-format discovery sends `x-api-key` and the default `anthropic-version: 2023-06-01` header. Values in `modelsDiscovery.headers` can override the default headers.
 
 ```json
 {
@@ -112,6 +118,7 @@ Provider-level overrides can live under `provider.<name>.options.modelsDiscovery
         "baseURL": "https://example.com/v1",
         "apiKey": "{env:MY_PROVIDER_API_KEY}",
         "modelsDiscovery": {
+          "apiFormat": "openai",
           "refreshIntervalHours": 6,
           "overrideExisting": true
         }
@@ -123,12 +130,13 @@ Provider-level overrides can live under `provider.<name>.options.modelsDiscovery
 
 Supported options:
 
+- `apiFormat`: provider-level `"openai"` or `"anthropic"` override; normally inferred from the provider id or SDK.
 - `enabled`: set `false` to disable globally.
 - `refreshIntervalHours`: defaults to `24`.
 - `refreshIntervalMs`: millisecond form, takes precedence over hours.
 - `cachePath`: global option for cache file location.
-- `fallbackContextTokens`: optional context limit for newly discovered OpenAI models without context metadata.
-- `fallbackOutputTokens`: optional output limit for newly discovered OpenAI models without output metadata.
+- `fallbackContextTokens`: optional context limit for newly discovered built-in provider models without context metadata.
+- `fallbackOutputTokens`: optional output limit for newly discovered built-in provider models without output metadata.
 - `maxResponseBytes`: maximum discovery response size in bytes; defaults to 5 MiB.
 - `maxPages`: maximum number of same-origin discovery pages; defaults to `10`.
 - `timeoutMs`: timeout for each discovery page request; defaults to 10 seconds.
@@ -154,6 +162,7 @@ Default cache path:
 - Tested against `@opencode-ai/plugin` 1.17.x.
 - Published output is standard ESM and requires Node.js 20 or newer when imported outside opencode.
 - Discovery endpoints must use HTTP or HTTPS and return an array, `{ "data": [] }`, or `{ "models": [] }`.
+- OpenCode currently supplies `/connect` credentials to plugin model hooks one provider id at a time. This package registers hooks for the built-in `openai` and `anthropic` ids. Custom provider ids should configure `options.apiKey` or discovery headers.
 
 ## Troubleshooting
 
