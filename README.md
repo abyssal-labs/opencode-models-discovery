@@ -1,18 +1,26 @@
 # opencode-models-discovery
 
-OpenCode plugin that discovers model metadata from OpenAI- and Anthropic-compatible `/models` endpoints and applies it to provider config.
+OpenCode plugin that discovers model metadata from compatible model-list endpoints and applies it to provider config.
 
 This is for wrappers and proxies that set `provider.<name>.options.baseURL`. Native OAuth is skipped when it does not use a custom `baseURL` and OpenCode already manages that provider's model catalog.
 
-It automatically detects custom-baseURL providers using these SDK paths:
+For configured providers with a custom `baseURL`, the plugin selects the wire format globally:
 
-- Provider id `openai`
-- `npm: "@ai-sdk/openai"`
-- `npm: "@ai-sdk/openai-compatible"`
-- Provider id `anthropic`
-- `npm: "@ai-sdk/anthropic"`
+- Anthropic-family SDK identifiers use Anthropic headers and pagination.
+- OpenAI-family SDK identifiers use the OpenAI model-list format.
+- Other custom-baseURL providers default to the OpenAI format.
 
 Other provider IDs can opt into either wire format with `modelsDiscovery.apiFormat` set to `"openai"` or `"anthropic"`.
+
+The package also registers dedicated adapters automatically for APIs that do not follow either format:
+
+- Amazon Bedrock foundation models, using a Bedrock bearer token and `AWS_REGION`.
+- Cloudflare Workers AI, using the account id captured by `/connect` or `CLOUDFLARE_ACCOUNT_ID`.
+- Cohere chat-capable models.
+- Google Gemini generative models.
+- Vercel AI Gateway's public model catalog.
+
+GitHub Copilot, DigitalOcean, and GitLab are left to OpenCode's native dynamic discovery.
 
 All matching providers are included by default. Use `providers.include` as an optional allowlist; when it is empty or omitted, all matching providers are included. Use `providers.exclude` to skip a provider.
 
@@ -77,9 +85,11 @@ Paginated responses can use `next_page`, `next`, or `has_more` with `last_id`. C
 
 Default refresh interval is 24 hours. Cached values are still applied on startup when the cache is fresh; the endpoint is only rechecked after the interval.
 
-For the built-in `openai` and `anthropic` providers, discovery uses API credentials configured through OpenCode's `/connect` flow when `options.apiKey` is not set. Credentials are supplied by OpenCode's supported plugin runtime and are never read from its on-disk auth store. An explicit `options.apiKey` takes precedence.
+For built-in providers with registered adapters, discovery uses API credentials configured through OpenCode's `/connect` flow when `options.apiKey` is not set. Credentials are supplied by OpenCode's supported plugin runtime and are never read from its on-disk auth store. An explicit `options.apiKey` takes precedence.
 
 OpenAI-format discovery sends `Authorization: Bearer <key>`. Anthropic-format discovery sends `x-api-key` and the default `anthropic-version: 2023-06-01` header. Values in `modelsDiscovery.headers` can override the default headers.
+
+Amazon Bedrock discovery supports the bearer token stored by `/connect`. AWS access keys, profiles, workload identity, and other SigV4 credential-chain sources are not exposed to plugin model hooks, so those setups retain OpenCode's existing catalog. Google Vertex has the same limitation with Application Default Credentials and is not dynamically discovered.
 
 ```json
 {
@@ -161,8 +171,9 @@ Default cache path:
 
 - Tested against `@opencode-ai/plugin` 1.17.x.
 - Published output is standard ESM and requires Node.js 20 or newer when imported outside opencode.
-- Discovery endpoints must use HTTP or HTTPS and return an array, `{ "data": [] }`, or `{ "models": [] }`.
-- OpenCode currently supplies `/connect` credentials to plugin model hooks one provider id at a time. This package registers hooks for the built-in `openai` and `anthropic` ids. Custom provider ids should configure `options.apiKey` or discovery headers.
+- Discovery endpoints must use HTTP or HTTPS and return a supported model-list response.
+- OpenCode currently supplies `/connect` credentials to plugin model hooks one provider id at a time. The package exports exact-id hooks only for its built-in and dedicated adapters; globally detected custom provider ids should configure `options.apiKey` or discovery headers.
+- Azure OpenAI is not discovered because its resource model list does not reliably identify inference deployment names. Google Vertex is not discovered because its ADC credentials are unavailable to plugin hooks.
 
 ## Troubleshooting
 
