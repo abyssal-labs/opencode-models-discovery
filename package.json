@@ -1,6 +1,6 @@
 {
   "name": "@abyssal-labs/opencode-models-discovery",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "opencode plugin that discovers OpenAI- and Anthropic-compatible models from /models endpoints",
   "keywords": [
     "opencode",
