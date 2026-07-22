@@ -1,6 +1,6 @@
 {
   "name": "@abyssal-labs/opencode-models-discovery",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Automatically discover available provider models and metadata in OpenCode",
   "keywords": [
     "opencode",
