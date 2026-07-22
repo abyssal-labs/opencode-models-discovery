@@ -42,7 +42,7 @@ type OpenCodeConfig = {
 
 export type ApiFormat = "openai" | "anthropic"
 
-type DiscoveryFormat = ApiFormat | "cloudflare" | "cohere" | "google"
+type DiscoveryFormat = ApiFormat | "bedrock" | "cloudflare" | "cohere" | "google"
 
 type BaseURLResolver = (
   provider: ProviderInfo,
@@ -114,7 +114,15 @@ const DEFAULT_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000
 const DEFAULT_MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 const DEFAULT_MAX_PAGES = 10
 const DEFAULT_TIMEOUT_MS = 10_000
-const HOOKED_PROVIDERS = new Set(["openai", "anthropic", "cloudflare-workers-ai", "cohere", "google", "vercel"])
+const HOOKED_PROVIDERS = new Set([
+  "openai",
+  "amazon-bedrock",
+  "anthropic",
+  "cloudflare-workers-ai",
+  "cohere",
+  "google",
+  "vercel",
+])
 
 function createPlugin(
   hookedProviderID: string,
@@ -228,6 +236,18 @@ function createPlugin(
 const plugin = createPlugin("openai", "openai", true)
 
 export const AnthropicModelsDiscoveryPlugin = createPlugin("anthropic", "anthropic", false)
+
+export const AmazonBedrockModelsDiscoveryPlugin = createPlugin(
+  "amazon-bedrock",
+  "bedrock",
+  false,
+  undefined,
+  (_provider, configured) => {
+    const region = stringValue(configured?.options?.region, process.env.AWS_REGION) ?? "us-east-1"
+    if (!/^[a-z]{2}(?:-gov)?-[a-z]+-\d+$/.test(region)) return undefined
+    return `https://bedrock.${region}.amazonaws.com`
+  },
+)
 
 export const CloudflareWorkersModelsDiscoveryPlugin = createPlugin(
   "cloudflare-workers-ai",
@@ -440,6 +460,11 @@ function modelsURL(baseURL: string, apiFormat: DiscoveryFormat) {
     throw new TypeError("Discovery baseURL must use HTTP or HTTPS")
   }
   if (apiFormat === "cloudflare") return url
+  if (apiFormat === "bedrock") {
+    url.pathname = `${url.pathname.replace(/\/+$/, "")}/foundation-models`
+    url.hash = ""
+    return url
+  }
   url.pathname = `${url.pathname.replace(/\/+$/, "")}/models`
   url.hash = ""
   return url
@@ -552,7 +577,9 @@ async function fetchModels(input: {
           ? responseObject.data
           : Array.isArray(responseObject?.models)
             ? responseObject.models
-            : undefined
+            : Array.isArray(responseObject?.modelSummaries)
+              ? responseObject.modelSummaries
+              : undefined
       if (!values) return { ok: false as const, reason: "Invalid or oversized JSON response" }
 
       const pageModels = values
@@ -610,6 +637,21 @@ function nextPageURL(response: Record<string, unknown> | undefined, current: URL
 
 function normalizeRemoteModel(model: Record<string, unknown> | undefined, apiFormat: DiscoveryFormat) {
   if (!model) return undefined
+  if (apiFormat === "bedrock") {
+    const outputModalities = stringArray(model.outputModalities)
+    if (outputModalities && !outputModalities.includes("TEXT")) return undefined
+    const lifecycle = objectValue(model.modelLifecycle)
+    if (lifecycle?.status && lifecycle.status !== "ACTIVE") return undefined
+    const id = stringValue(model.modelId)
+    if (!id) return undefined
+    return {
+      ...model,
+      id,
+      name: stringValue(model.modelName, id),
+      input_modalities: stringArray(model.inputModalities)?.map((value) => value.toLowerCase()),
+      output_modalities: outputModalities?.map((value) => value.toLowerCase()),
+    } as RemoteModel
+  }
   if (apiFormat === "cohere") {
     const endpoints = stringArray(model.endpoints)
     if (endpoints && !endpoints.includes("chat")) return undefined

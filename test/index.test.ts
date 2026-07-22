@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
 import plugin, {
+  AmazonBedrockModelsDiscoveryPlugin,
   AnthropicModelsDiscoveryPlugin,
   CloudflareWorkersModelsDiscoveryPlugin,
   CohereModelsDiscoveryPlugin,
@@ -455,6 +456,72 @@ test("discovers Cloudflare Workers AI models with account metadata", async (t) =
   )
   assert.equal(authorization, "Bearer cloudflare-secret")
   assert.equal(models?.["@cf/example/model"].limit.context, 32_000)
+})
+
+test("discovers active text models from Amazon Bedrock", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+
+  const originalFetch = globalThis.fetch
+  const originalRegion = process.env.AWS_REGION
+  process.env.AWS_REGION = "eu-west-1"
+  let requestedURL = ""
+  let authorization = ""
+  globalThis.fetch = async (input, init) => {
+    requestedURL = input.toString()
+    authorization = new Headers(init?.headers).get("authorization") ?? ""
+    return Response.json({
+      modelSummaries: [
+        {
+          modelId: "provider.text-model",
+          modelName: "Text Model",
+          modelLifecycle: { status: "ACTIVE" },
+          inputModalities: ["TEXT", "IMAGE"],
+          outputModalities: ["TEXT"],
+        },
+        {
+          modelId: "provider.image-model",
+          modelLifecycle: { status: "ACTIVE" },
+          outputModalities: ["IMAGE"],
+        },
+        {
+          modelId: "provider.legacy-model",
+          modelLifecycle: { status: "LEGACY" },
+          outputModalities: ["TEXT"],
+        },
+      ],
+    })
+  }
+  t.after(() => {
+    globalThis.fetch = originalFetch
+    if (originalRegion === undefined) delete process.env.AWS_REGION
+    else process.env.AWS_REGION = originalRegion
+  })
+
+  const hooks = await AmazonBedrockModelsDiscoveryPlugin({} as never, {
+    cachePath: join(directory, "cache.json"),
+  })
+  const template = providerModel("template-model")
+  template.providerID = "amazon-bedrock"
+  template.api.npm = "@ai-sdk/amazon-bedrock"
+  const models = await hooks.provider?.models?.(
+    {
+      id: "amazon-bedrock",
+      name: "Amazon Bedrock",
+      source: "env",
+      env: ["AWS_BEARER_TOKEN_BEDROCK"],
+      options: {},
+      models: { "template-model": template },
+    },
+    { auth: { type: "api", key: "bedrock-secret" } },
+  )
+
+  assert.equal(requestedURL, "https://bedrock.eu-west-1.amazonaws.com/foundation-models")
+  assert.equal(authorization, "Bearer bedrock-secret")
+  assert.equal(models?.["provider.text-model"].name, "Text Model")
+  assert.equal(models?.["provider.text-model"].capabilities.input.image, true)
+  assert.equal(models?.["provider.image-model"], undefined)
+  assert.equal(models?.["provider.legacy-model"], undefined)
 })
 
 test("supports an explicit API format for custom provider SDKs", async (t) => {
