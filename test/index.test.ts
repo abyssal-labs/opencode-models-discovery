@@ -4,7 +4,11 @@ import { createServer } from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
-import plugin, { AnthropicModelsDiscoveryPlugin, GoogleModelsDiscoveryPlugin } from "../src/index.ts"
+import plugin, {
+  AnthropicModelsDiscoveryPlugin,
+  CohereModelsDiscoveryPlugin,
+  GoogleModelsDiscoveryPlugin,
+} from "../src/index.ts"
 
 test("discovers models for an OpenAI-compatible provider", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
@@ -325,6 +329,55 @@ test("discovers generative Google models with connect credentials", async (t) =>
   assert.equal(models?.["gemini-example"].name, "Gemini Example")
   assert.deepEqual(models?.["gemini-example"].limit, { context: 32_000, output: 8_000 })
   assert.equal(models?.["embedding-example"], undefined)
+})
+
+test("discovers chat-capable Cohere models with pagination", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+
+  const originalFetch = globalThis.fetch
+  const requestedURLs: string[] = []
+  let authorization = ""
+  globalThis.fetch = async (input, init) => {
+    requestedURLs.push(input.toString())
+    authorization = new Headers(init?.headers).get("authorization") ?? ""
+    return requestedURLs.length === 1
+      ? Response.json({
+          models: [
+            { name: "command-example", endpoints: ["chat"], context_length: 128_000 },
+            { name: "embed-example", endpoints: ["embed"] },
+          ],
+          next_page_token: "second-page",
+        })
+      : Response.json({ models: [] })
+  }
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  const hooks = await CohereModelsDiscoveryPlugin({} as never, { cachePath: join(directory, "cache.json") })
+  const template = providerModel("template-model")
+  template.providerID = "cohere"
+  template.api.npm = "@ai-sdk/cohere"
+  const models = await hooks.provider?.models?.(
+    {
+      id: "cohere",
+      name: "Cohere",
+      source: "env",
+      env: ["COHERE_API_KEY"],
+      options: {},
+      models: { "template-model": template },
+    },
+    { auth: { type: "api", key: "cohere-secret" } },
+  )
+
+  assert.deepEqual(requestedURLs, [
+    "https://api.cohere.com/v1/models",
+    "https://api.cohere.com/v1/models?page_token=second-page",
+  ])
+  assert.equal(authorization, "Bearer cohere-secret")
+  assert.equal(models?.["command-example"].limit.context, 128_000)
+  assert.equal(models?.["embed-example"], undefined)
 })
 
 test("supports an explicit API format for custom provider SDKs", async (t) => {

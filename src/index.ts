@@ -42,7 +42,7 @@ type OpenCodeConfig = {
 
 export type ApiFormat = "openai" | "anthropic"
 
-type DiscoveryFormat = ApiFormat | "google"
+type DiscoveryFormat = ApiFormat | "cohere" | "google"
 
 export type ProviderDiscoveryOptions = {
   apiFormat?: ApiFormat
@@ -108,7 +108,7 @@ const DEFAULT_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000
 const DEFAULT_MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 const DEFAULT_MAX_PAGES = 10
 const DEFAULT_TIMEOUT_MS = 10_000
-const HOOKED_PROVIDERS = new Set(["openai", "anthropic", "google"])
+const HOOKED_PROVIDERS = new Set(["openai", "anthropic", "cohere", "google"])
 
 function createPlugin(
   hookedProviderID: string,
@@ -217,6 +217,8 @@ function createPlugin(
 const plugin = createPlugin("openai", "openai", true)
 
 export const AnthropicModelsDiscoveryPlugin = createPlugin("anthropic", "anthropic", false)
+
+export const CohereModelsDiscoveryPlugin = createPlugin("cohere", "cohere", false, "https://api.cohere.com/v1")
 
 export const GoogleModelsDiscoveryPlugin = createPlugin(
   "google",
@@ -554,6 +556,13 @@ async function fetchModels(input: {
 
 function nextPageURL(response: Record<string, unknown> | undefined, current: URL, apiFormat: DiscoveryFormat) {
   if (!response) return undefined
+  if (apiFormat === "cohere") {
+    const pageToken = stringValue(response.next_page_token)
+    if (!pageToken) return undefined
+    const url = new URL(current)
+    url.searchParams.set("page_token", pageToken)
+    return url
+  }
   if (apiFormat === "google") {
     const pageToken = stringValue(response.nextPageToken)
     if (!pageToken) return undefined
@@ -575,6 +584,13 @@ function nextPageURL(response: Record<string, unknown> | undefined, current: URL
 
 function normalizeRemoteModel(model: Record<string, unknown> | undefined, apiFormat: DiscoveryFormat) {
   if (!model) return undefined
+  if (apiFormat === "cohere") {
+    const endpoints = stringArray(model.endpoints)
+    if (endpoints && !endpoints.includes("chat")) return undefined
+    const name = stringValue(model.name)
+    if (!name) return undefined
+    return { ...model, id: name } as RemoteModel
+  }
   if (apiFormat !== "google") return model as RemoteModel
 
   const methods = stringArray(model.supportedGenerationMethods)
