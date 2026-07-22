@@ -1,8 +1,58 @@
 # opencode-models-discovery
 
-OpenCode plugin that discovers model metadata from compatible model-list endpoints and applies it to provider config.
+[![npm version](https://img.shields.io/npm/v/%40abyssal-labs%2Fopencode-models-discovery)](https://www.npmjs.com/package/@abyssal-labs/opencode-models-discovery)
+[![npm downloads](https://img.shields.io/npm/dm/%40abyssal-labs%2Fopencode-models-discovery)](https://www.npmjs.com/package/@abyssal-labs/opencode-models-discovery)
+[![CI](https://github.com/abyssal-labs/opencode-models-discovery/actions/workflows/ci.yml/badge.svg)](https://github.com/abyssal-labs/opencode-models-discovery/actions/workflows/ci.yml)
+[![Node.js](https://img.shields.io/node/v/%40abyssal-labs%2Fopencode-models-discovery)](https://www.npmjs.com/package/@abyssal-labs/opencode-models-discovery)
+[![License](https://img.shields.io/npm/l/%40abyssal-labs%2Fopencode-models-discovery)](LICENSE)
 
-This is for wrappers and proxies that set `provider.<name>.options.baseURL`. Native OAuth is skipped when it does not use a custom `baseURL` and OpenCode already manages that provider's model catalog.
+Discover the models your OpenCode providers actually expose. The plugin queries compatible model-list APIs at startup, updates OpenCode's model selector, and caches the result for fast subsequent launches.
+
+## Features
+
+- One global plugin entry enables discovery for every configured compatible provider.
+- Automatically selects OpenAI or Anthropic model-list behavior from the provider family.
+- Supports custom wrappers, gateways, local servers, and proxies through `options.baseURL`.
+- Uses credentials supplied by OpenCode's `/connect` flow without reading its on-disk auth store.
+- Includes dedicated discovery for Amazon Bedrock, Cloudflare Workers AI, Cohere, Google Gemini, and Vercel AI Gateway.
+- Preserves model IDs and maps context limits, output limits, display names, modalities, modes, service tiers, and costs when endpoints provide them.
+- Uses bounded responses, request timeouts, same-origin pagination, credential-scoped caching, and stale-cache fallback.
+- Never enriches or replaces endpoint results with models.dev metadata.
+
+## Quick start
+
+Add the plugin to `opencode.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["@abyssal-labs/opencode-models-discovery"]
+}
+```
+
+Connect a supported built-in provider with `/connect`, or configure a provider with a compatible `baseURL`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["@abyssal-labs/opencode-models-discovery"],
+  "provider": {
+    "my-provider": {
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "https://example.com/v1",
+        "apiKey": "{env:MY_PROVIDER_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+Restart OpenCode. Discovered models are then available through the normal model selector.
+
+## Discovery
+
+Native OAuth is skipped when it does not use a custom `baseURL` and OpenCode already manages that provider's model catalog.
 
 For configured providers with a custom `baseURL`, the plugin selects the wire format globally:
 
@@ -57,7 +107,7 @@ Mode metadata can provide:
 
 Paginated responses can use `next_page`, `next`, or `has_more` with `last_id`. Continuation URLs must remain on the original origin.
 
-## Usage
+## Configuration
 
 ```json
 {
@@ -169,7 +219,7 @@ Default cache path:
 
 ## Compatibility
 
-- Tested against `@opencode-ai/plugin` 1.17.x.
+- Tested against `@opencode-ai/plugin` 1.18.x.
 - Published output is standard ESM and requires Node.js 20 or newer when imported outside opencode.
 - Discovery endpoints must use HTTP or HTTPS and return a supported model-list response.
 - OpenCode currently supplies `/connect` credentials to plugin model hooks one provider id at a time. The package exports exact-id hooks only for its built-in and dedicated adapters; globally detected custom provider ids should configure `options.apiKey` or discovery headers.

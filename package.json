@@ -1,13 +1,21 @@
 {
   "name": "@abyssal-labs/opencode-models-discovery",
   "version": "0.7.0",
-  "description": "opencode plugin that discovers OpenAI- and Anthropic-compatible models from /models endpoints",
+  "description": "Automatically discover available provider models and metadata in OpenCode",
   "keywords": [
     "opencode",
     "opencode-plugin",
     "openai-compatible",
     "anthropic-compatible",
-    "model-discovery"
+    "amazon-bedrock",
+    "cloudflare-workers-ai",
+    "cohere",
+    "dynamic-models",
+    "google-gemini",
+    "llm-gateway",
+    "llm-proxy",
+    "model-discovery",
+    "vercel-ai-gateway"
   ],
   "homepage": "https://github.com/abyssal-labs/opencode-models-discovery#readme",
   "repository": {
@@ -51,7 +59,7 @@
     "node": ">=20"
   },
   "devDependencies": {
-    "@opencode-ai/plugin": "^1.17.18",
+    "@opencode-ai/plugin": "^1.18.4",
     "@semantic-release/git": "^10.0.1",
     "@semantic-release/github": "^12.0.8",
     "@semantic-release/npm": "^13.1.5",
