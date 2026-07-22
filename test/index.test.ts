@@ -243,6 +243,47 @@ test("auto-detects Anthropic-compatible configured providers", async (t) => {
   assert.ok(config.provider.proxy.models?.["claude-proxy"])
 })
 
+test("auto-detects provider SDKs that use the OpenAI model-list format", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+
+  const originalFetch = globalThis.fetch
+  const requestedHosts: string[] = []
+  globalThis.fetch = async (input) => {
+    requestedHosts.push(new URL(input.toString()).hostname)
+    return Response.json({ data: [{ id: "openai-format-model" }] })
+  }
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  const providers = Object.fromEntries(
+    [
+      "@ai-sdk/cerebras",
+      "@ai-sdk/deepinfra",
+      "@ai-sdk/groq",
+      "@ai-sdk/mistral",
+      "@ai-sdk/togetherai",
+      "@ai-sdk/xai",
+      "@aihubmix/ai-sdk-provider",
+      "@openrouter/ai-sdk-provider",
+      "venice-ai-sdk-provider",
+    ].map((npm, index) => [
+      `provider-${index}`,
+      {
+        npm,
+        options: { baseURL: `https://provider-${index}.example/v1` },
+        models: undefined as Record<string, unknown> | undefined,
+      },
+    ]),
+  )
+  const hooks = await plugin({} as never, { cachePath: join(directory, "cache.json") })
+  await hooks.config?.({ provider: providers } as never)
+
+  assert.equal(requestedHosts.length, Object.keys(providers).length)
+  for (const provider of Object.values(providers)) assert.ok(provider.models?.["openai-format-model"])
+})
+
 test("supports an explicit API format for custom provider SDKs", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
   t.after(() => rm(directory, { recursive: true, force: true }))
