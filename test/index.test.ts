@@ -4,7 +4,7 @@ import { createServer } from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
-import plugin, { AnthropicModelsDiscoveryPlugin } from "../src/index.ts"
+import plugin, { AnthropicModelsDiscoveryPlugin, GoogleModelsDiscoveryPlugin } from "../src/index.ts"
 
 test("discovers models for an OpenAI-compatible provider", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
@@ -269,6 +269,62 @@ test("defaults custom-baseURL providers to the OpenAI model-list format", async 
 
   assert.deepEqual(requestedHosts, ["proxy.example"])
   assert.ok(providers.proxy.models?.["openai-format-model"])
+})
+
+test("discovers generative Google models with connect credentials", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+
+  const originalFetch = globalThis.fetch
+  const requestedURLs: string[] = []
+  let requestHeaders = new Headers()
+  globalThis.fetch = async (input, init) => {
+    requestedURLs.push(input.toString())
+    requestHeaders = new Headers(init?.headers)
+    return requestedURLs.length === 1
+      ? Response.json({
+          models: [
+            {
+              name: "models/gemini-example",
+              displayName: "Gemini Example",
+              supportedGenerationMethods: ["generateContent"],
+              inputTokenLimit: 32_000,
+              outputTokenLimit: 8_000,
+            },
+            { name: "models/embedding-example", supportedGenerationMethods: ["embedContent"] },
+          ],
+          nextPageToken: "second-page",
+        })
+      : Response.json({ models: [] })
+  }
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  const hooks = await GoogleModelsDiscoveryPlugin({} as never, { cachePath: join(directory, "cache.json") })
+  const template = providerModel("template-model")
+  template.providerID = "google"
+  template.api.npm = "@ai-sdk/google"
+  const models = await hooks.provider?.models?.(
+    {
+      id: "google",
+      name: "Google",
+      source: "env",
+      env: ["GOOGLE_API_KEY"],
+      options: {},
+      models: { "template-model": template },
+    },
+    { auth: { type: "api", key: "google-secret" } },
+  )
+
+  assert.deepEqual(requestedURLs, [
+    "https://generativelanguage.googleapis.com/v1beta/models",
+    "https://generativelanguage.googleapis.com/v1beta/models?pageToken=second-page",
+  ])
+  assert.equal(requestHeaders.get("x-goog-api-key"), "google-secret")
+  assert.equal(models?.["gemini-example"].name, "Gemini Example")
+  assert.deepEqual(models?.["gemini-example"].limit, { context: 32_000, output: 8_000 })
+  assert.equal(models?.["embedding-example"], undefined)
 })
 
 test("supports an explicit API format for custom provider SDKs", async (t) => {

@@ -42,6 +42,8 @@ type OpenCodeConfig = {
 
 export type ApiFormat = "openai" | "anthropic"
 
+type DiscoveryFormat = ApiFormat | "google"
+
 export type ProviderDiscoveryOptions = {
   apiFormat?: ApiFormat
   refreshIntervalMs?: number
@@ -106,12 +108,13 @@ const DEFAULT_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000
 const DEFAULT_MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 const DEFAULT_MAX_PAGES = 10
 const DEFAULT_TIMEOUT_MS = 10_000
-const HOOKED_PROVIDERS = new Set(["openai", "anthropic"])
+const HOOKED_PROVIDERS = new Set(["openai", "anthropic", "google"])
 
 function createPlugin(
   hookedProviderID: string,
-  hookedApiFormat: ApiFormat,
+  hookedApiFormat: DiscoveryFormat,
   discoverConfiguredProviders: boolean,
+  defaultBaseURL?: string,
 ): Plugin {
   return async (input, options = {}) => {
     validatePluginOptions(options)
@@ -173,7 +176,7 @@ function createPlugin(
           if (ctx.auth?.type === "oauth") return provider.models
           const configProvider = capturedProviders.get(provider.id)
           const providerOptions = normalizeProviderOptions(configProvider?.options?.modelsDiscovery, pluginOptions)
-          const baseURL = configProvider?.options?.baseURL
+          const baseURL = configProvider?.options?.baseURL ?? defaultBaseURL
           if (!baseURL) return provider.models
           if (!matchesProviderFilter(provider.id, providerOptions)) return provider.models
 
@@ -214,6 +217,13 @@ function createPlugin(
 const plugin = createPlugin("openai", "openai", true)
 
 export const AnthropicModelsDiscoveryPlugin = createPlugin("anthropic", "anthropic", false)
+
+export const GoogleModelsDiscoveryPlugin = createPlugin(
+  "google",
+  "google",
+  false,
+  "https://generativelanguage.googleapis.com/v1beta",
+)
 
 function normalizePluginOptions(options: PluginOptions) {
   return {
@@ -409,7 +419,7 @@ function modelsURL(baseURL: string) {
 
 function modelCacheKey(
   providerID: string,
-  input: { baseURL: string; apiKey?: string; headers?: Record<string, string>; apiFormat: ApiFormat },
+  input: { baseURL: string; apiKey?: string; headers?: Record<string, string>; apiFormat: DiscoveryFormat },
 ) {
   const headers = Object.entries(input.headers ?? {}).sort(([left], [right]) => left.localeCompare(right))
   const digest = createHash("sha256")
@@ -426,7 +436,7 @@ async function refreshModels(
     providerID: string
     baseURL: string
     apiKey?: string
-    apiFormat: ApiFormat
+    apiFormat: DiscoveryFormat
     headers?: Record<string, string>
     maxResponseBytes: number
     maxPages: number
@@ -473,7 +483,7 @@ function redactedURL(value: string) {
 async function fetchModels(input: {
   baseURL: string
   apiKey?: string
-  apiFormat: ApiFormat
+  apiFormat: DiscoveryFormat
   headers?: Record<string, string>
   maxResponseBytes: number
   maxPages: number
@@ -484,6 +494,8 @@ async function fetchModels(input: {
   if (input.apiFormat === "anthropic") {
     if (input.apiKey && !headers.has("x-api-key")) headers.set("x-api-key", input.apiKey)
     if (!headers.has("anthropic-version")) headers.set("anthropic-version", "2023-06-01")
+  } else if (input.apiFormat === "google") {
+    if (input.apiKey && !headers.has("x-goog-api-key")) headers.set("x-goog-api-key", input.apiKey)
   } else if (input.apiKey && !headers.has("authorization")) {
     headers.set("authorization", `Bearer ${input.apiKey}`)
   }
@@ -517,13 +529,14 @@ async function fetchModels(input: {
 
       const pageModels = values
         .map(objectValue)
+        .map((model) => normalizeRemoteModel(model, input.apiFormat))
         .filter((model): model is RemoteModel => model !== undefined && modelID(model) !== undefined)
       if (values.length > 0 && pageModels.length === 0) {
         return { ok: false as const, reason: "Response contains no valid models" }
       }
       for (const model of pageModels) models.set(modelID(model)!, model)
 
-      const next = nextPageURL(responseObject, url)
+      const next = nextPageURL(responseObject, url, input.apiFormat)
       if (!next) return { ok: true as const, models: [...models.values()] }
       if (next.origin !== initialURL.origin) {
         return { ok: false as const, reason: "Cross-origin pagination URL rejected" }
@@ -539,8 +552,15 @@ async function fetchModels(input: {
   }
 }
 
-function nextPageURL(response: Record<string, unknown> | undefined, current: URL) {
+function nextPageURL(response: Record<string, unknown> | undefined, current: URL, apiFormat: DiscoveryFormat) {
   if (!response) return undefined
+  if (apiFormat === "google") {
+    const pageToken = stringValue(response.nextPageToken)
+    if (!pageToken) return undefined
+    const url = new URL(current)
+    url.searchParams.set("pageToken", pageToken)
+    return url
+  }
   const pagination = objectValue(response.pagination)
   const next = stringValue(response.next_page, response.next, pagination?.next_page, pagination?.next)
   if (next) return new URL(next, current)
@@ -551,6 +571,26 @@ function nextPageURL(response: Record<string, unknown> | undefined, current: URL
   const url = new URL(current)
   url.searchParams.set("after", lastID)
   return url
+}
+
+function normalizeRemoteModel(model: Record<string, unknown> | undefined, apiFormat: DiscoveryFormat) {
+  if (!model) return undefined
+  if (apiFormat !== "google") return model as RemoteModel
+
+  const methods = stringArray(model.supportedGenerationMethods)
+  if (methods && !methods.includes("generateContent")) return undefined
+  const name = stringValue(model.name)
+  if (!name) return undefined
+  return {
+    ...model,
+    id: name.replace(/^models\//, ""),
+    name: stringValue(model.displayName, name),
+    metadata: {
+      ...objectValue(model.metadata),
+      context_window: model.inputTokenLimit,
+      max_output_tokens: model.outputTokenLimit,
+    },
+  } as RemoteModel
 }
 
 async function writeLog(input: Parameters<Plugin>[0], message: string, extra: Record<string, unknown>) {
