@@ -108,7 +108,7 @@ const DEFAULT_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000
 const DEFAULT_MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 const DEFAULT_MAX_PAGES = 10
 const DEFAULT_TIMEOUT_MS = 10_000
-const HOOKED_PROVIDERS = new Set(["openai", "anthropic", "cohere", "google"])
+const HOOKED_PROVIDERS = new Set(["openai", "anthropic", "cohere", "google", "vercel"])
 
 function createPlugin(
   hookedProviderID: string,
@@ -226,6 +226,8 @@ export const GoogleModelsDiscoveryPlugin = createPlugin(
   false,
   "https://generativelanguage.googleapis.com/v1beta",
 )
+
+export const VercelModelsDiscoveryPlugin = createPlugin("vercel", "openai", false, "https://ai-gateway.vercel.sh/v1")
 
 function normalizePluginOptions(options: PluginOptions) {
   return {

@@ -8,6 +8,7 @@ import plugin, {
   AnthropicModelsDiscoveryPlugin,
   CohereModelsDiscoveryPlugin,
   GoogleModelsDiscoveryPlugin,
+  VercelModelsDiscoveryPlugin,
 } from "../src/index.ts"
 
 test("discovers models for an OpenAI-compatible provider", async (t) => {
@@ -378,6 +379,40 @@ test("discovers chat-capable Cohere models with pagination", async (t) => {
   assert.equal(authorization, "Bearer cohere-secret")
   assert.equal(models?.["command-example"].limit.context, 128_000)
   assert.equal(models?.["embed-example"], undefined)
+})
+
+test("discovers Vercel Gateway models from its public catalog endpoint", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+
+  const originalFetch = globalThis.fetch
+  let requestedURL = ""
+  globalThis.fetch = async (input) => {
+    requestedURL = input.toString()
+    return Response.json({ data: [{ id: "creator/example-model", context_window: 64_000 }] })
+  }
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  const hooks = await VercelModelsDiscoveryPlugin({} as never, { cachePath: join(directory, "cache.json") })
+  const template = providerModel("template-model")
+  template.providerID = "vercel"
+  template.api.npm = "@ai-sdk/gateway"
+  const models = await hooks.provider?.models?.(
+    {
+      id: "vercel",
+      name: "Vercel AI Gateway",
+      source: "env",
+      env: ["AI_GATEWAY_API_KEY"],
+      options: {},
+      models: { "template-model": template },
+    },
+    {},
+  )
+
+  assert.equal(requestedURL, "https://ai-gateway.vercel.sh/v1/models")
+  assert.equal(models?.["creator/example-model"].limit.context, 64_000)
 })
 
 test("supports an explicit API format for custom provider SDKs", async (t) => {
