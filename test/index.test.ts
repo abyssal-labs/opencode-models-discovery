@@ -6,6 +6,7 @@ import { join } from "node:path"
 import test from "node:test"
 import plugin, {
   AnthropicModelsDiscoveryPlugin,
+  CloudflareWorkersModelsDiscoveryPlugin,
   CohereModelsDiscoveryPlugin,
   GoogleModelsDiscoveryPlugin,
   VercelModelsDiscoveryPlugin,
@@ -413,6 +414,47 @@ test("discovers Vercel Gateway models from its public catalog endpoint", async (
 
   assert.equal(requestedURL, "https://ai-gateway.vercel.sh/v1/models")
   assert.equal(models?.["creator/example-model"].limit.context, 64_000)
+})
+
+test("discovers Cloudflare Workers AI models with account metadata", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "opencode-models-discovery-"))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+
+  const originalFetch = globalThis.fetch
+  let requestedURL = ""
+  let authorization = ""
+  globalThis.fetch = async (input, init) => {
+    requestedURL = input.toString()
+    authorization = new Headers(init?.headers).get("authorization") ?? ""
+    return Response.json({ data: [{ id: "@cf/example/model", context_length: 32_000 }] })
+  }
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  const hooks = await CloudflareWorkersModelsDiscoveryPlugin({} as never, {
+    cachePath: join(directory, "cache.json"),
+  })
+  const template = providerModel("template-model")
+  template.providerID = "cloudflare-workers-ai"
+  const models = await hooks.provider?.models?.(
+    {
+      id: "cloudflare-workers-ai",
+      name: "Cloudflare Workers AI",
+      source: "env",
+      env: ["CLOUDFLARE_API_KEY"],
+      options: {},
+      models: { "template-model": template },
+    },
+    { auth: { type: "api", key: "cloudflare-secret", metadata: { accountId: "account/id" } } },
+  )
+
+  assert.equal(
+    requestedURL,
+    "https://api.cloudflare.com/client/v4/accounts/account%2Fid/ai/models/search?format=openrouter&per_page=1000",
+  )
+  assert.equal(authorization, "Bearer cloudflare-secret")
+  assert.equal(models?.["@cf/example/model"].limit.context, 32_000)
 })
 
 test("supports an explicit API format for custom provider SDKs", async (t) => {

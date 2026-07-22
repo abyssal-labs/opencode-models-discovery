@@ -42,7 +42,13 @@ type OpenCodeConfig = {
 
 export type ApiFormat = "openai" | "anthropic"
 
-type DiscoveryFormat = ApiFormat | "cohere" | "google"
+type DiscoveryFormat = ApiFormat | "cloudflare" | "cohere" | "google"
+
+type BaseURLResolver = (
+  provider: ProviderInfo,
+  configured: ProviderConfig | undefined,
+  authMetadata: Record<string, string> | undefined,
+) => string | undefined
 
 export type ProviderDiscoveryOptions = {
   apiFormat?: ApiFormat
@@ -108,13 +114,14 @@ const DEFAULT_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000
 const DEFAULT_MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 const DEFAULT_MAX_PAGES = 10
 const DEFAULT_TIMEOUT_MS = 10_000
-const HOOKED_PROVIDERS = new Set(["openai", "anthropic", "cohere", "google", "vercel"])
+const HOOKED_PROVIDERS = new Set(["openai", "anthropic", "cloudflare-workers-ai", "cohere", "google", "vercel"])
 
 function createPlugin(
   hookedProviderID: string,
   hookedApiFormat: DiscoveryFormat,
   discoverConfiguredProviders: boolean,
   defaultBaseURL?: string,
+  resolveBaseURL?: BaseURLResolver,
 ): Plugin {
   return async (input, options = {}) => {
     validatePluginOptions(options)
@@ -176,7 +183,11 @@ function createPlugin(
           if (ctx.auth?.type === "oauth") return provider.models
           const configProvider = capturedProviders.get(provider.id)
           const providerOptions = normalizeProviderOptions(configProvider?.options?.modelsDiscovery, pluginOptions)
-          const baseURL = configProvider?.options?.baseURL ?? defaultBaseURL
+          const authMetadata = ctx.auth?.type === "api" ? ctx.auth.metadata : undefined
+          const baseURL =
+            configProvider?.options?.baseURL ??
+            resolveBaseURL?.(provider, configProvider, authMetadata) ??
+            defaultBaseURL
           if (!baseURL) return provider.models
           if (!matchesProviderFilter(provider.id, providerOptions)) return provider.models
 
@@ -217,6 +228,18 @@ function createPlugin(
 const plugin = createPlugin("openai", "openai", true)
 
 export const AnthropicModelsDiscoveryPlugin = createPlugin("anthropic", "anthropic", false)
+
+export const CloudflareWorkersModelsDiscoveryPlugin = createPlugin(
+  "cloudflare-workers-ai",
+  "cloudflare",
+  false,
+  undefined,
+  (_provider, _configured, authMetadata) => {
+    const accountID = authMetadata?.accountId ?? process.env.CLOUDFLARE_ACCOUNT_ID
+    if (!accountID) return undefined
+    return `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountID)}/ai/models/search?format=openrouter&per_page=1000`
+  },
+)
 
 export const CohereModelsDiscoveryPlugin = createPlugin("cohere", "cohere", false, "https://api.cohere.com/v1")
 
@@ -411,11 +434,12 @@ function matchesProviderFilter(providerID: string, options: ReturnType<typeof no
   return true
 }
 
-function modelsURL(baseURL: string) {
+function modelsURL(baseURL: string, apiFormat: DiscoveryFormat) {
   const url = new URL(baseURL)
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new TypeError("Discovery baseURL must use HTTP or HTTPS")
   }
+  if (apiFormat === "cloudflare") return url
   url.pathname = `${url.pathname.replace(/\/+$/, "")}/models`
   url.hash = ""
   return url
@@ -505,7 +529,7 @@ async function fetchModels(input: {
   }
 
   try {
-    const initialURL = modelsURL(input.baseURL)
+    const initialURL = modelsURL(input.baseURL, input.apiFormat)
     let url = initialURL
     const visited = new Set<string>()
     const models = new Map<string, RemoteModel>()
